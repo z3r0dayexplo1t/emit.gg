@@ -1,0 +1,43 @@
+{
+    "name": "emit.gg",
+    "version": "1.0.0",
+    "description": "A lean, unopinionated WebSocket wrapper. Simple event-based messaging without the bloat.",
+    "main": "src/index.js",
+    "browser": "src/client.js",
+    "exports": {
+        ".": "./src/index.js",
+        "./server": "./src/server.js",
+        "./client": "./src/client.js"
+    },
+    "scripts": {
+        "test": "node test/test.js",
+        "example": "node examples/server-example.js"
+    },
+    "keywords": [
+        "websocket",
+        "websockets",
+        "realtime",
+        "events",
+        "socket",
+        "emit",
+        "lightweight",
+        "lean"
+    ],
+    "author": "",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/yourusername/emit.gg"
+    },
+    "bugs": {
+        "url": "https://github.com/yourusername/emit.gg/issues"
+    },
+    "homepage": "https://github.com/yourusername/emit.gg#readme",
+    "engines": {
+        "node": ">=14.0.0"
+    },
+    "dependencies": {
+        "ws": "^8.14.2"
+    },
+    "devDependencies": {}
+}
