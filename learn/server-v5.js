@@ -24,7 +24,7 @@ class EmitApp {
             console.log('Client connected:', socket.id);
 
             // Fire connection handler if exists
-            const handler = this.handlers.get('/connection');
+            const handler = this.handlers.get('@connection');
             if (handler) {
                 handler({ socket });
             }
@@ -70,7 +70,7 @@ class EmitSocket {
 
         ws.on('close', () => {
             console.log('Client disconnected:', this.id);
-            const handler = this.app.handlers.get('/disconnect');
+            const handler = this.app.handlers.get('@disconnect');
             if (handler) {
                 handler({ socket: this });
             }

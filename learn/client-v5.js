@@ -12,7 +12,7 @@ class EmitClient {
         });
 
         ws.on('close', () => {
-            this._callListeners('/disconnect', {});
+            this._callListeners('@disconnect', {});
         });
     }
 
@@ -24,10 +24,12 @@ class EmitClient {
             ws.on('open', () => {
                 const client = new EmitClient(ws);
                 resolve(client);
+                client._callListeners('@connection', {});
             });
 
             ws.on('error', (err) => {
                 reject(err);
+                client._callListeners('@error', { error: err });
             });
         });
     }
