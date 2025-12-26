@@ -1,16 +1,28 @@
-# emit.gg 🚀
+# emit.gg
 
-A lean, unopinionated WebSocket wrapper with an **Express-like API**. Simple event-based messaging without the bloat.
+A clean, Express-like WebSocket framework for Node.js.
 
-## Why emit.gg?
+```javascript
+const { EmitApp } = require('emit.gg');
 
-- **Express-like API** - Familiar `app.use()`, `app.on()`, `app.listen()` pattern
-- **Namespaces** - Group handlers like Express Router: `app.namespace('room')`
-- **Middleware Support** - Auth, logging, validation - just like Express
-- **Lightweight** - ~5KB, minimal dependencies
-- **Request/Response** - Built-in acknowledgments for RPC-style calls
-- **Promise-based** - Modern async/await API
-- **Zero Config** - Works out of the box
+const app = new EmitApp();
+
+app.on('/ping', (req) => {
+    req.reply({ pong: true });
+});
+
+app.listen(3000);
+```
+
+## Features
+
+- 🚀 **Express-like API** – Familiar routing and middleware patterns
+- 📦 **Plugin System** – Extend functionality with plugins
+- 🏠 **Rooms** – Group sockets and broadcast to channels
+- 🔀 **Namespaces** – Organize events with prefixes
+- ⚡ **Request/Response** – Promise-based request-reply pattern
+- 🔄 **Auto-Reconnect** – Client reconnects automatically
+- 🔧 **Middleware** – Global and route-specific middleware
 
 ## Installation
 
@@ -20,333 +32,355 @@ npm install emit.gg
 
 ## Quick Start
 
-### Server (Express-style)
+### Server
 
 ```javascript
-const emit = require('emit.gg');
-const app = emit();
+const { EmitApp } = require('emit.gg');
 
-// Middleware
-app.use((socket, next) => {
-  console.log('New connection:', socket.id);
-  next();
+const app = new EmitApp();
+
+app.on('@connection', (req) => {
+    console.log('Connected:', req.socket.id);
 });
 
-// Auth middleware
-app.use(async (socket, next) => {
-  const token = socket.query?.token;
-  if (!token) return socket.close();
-  socket.user = await verifyToken(token);
-  next();
+app.on('/ping', (req) => {
+    req.reply({ pong: true, time: Date.now() });
 });
 
-// Event handlers (like routes!)
-app.on('chat', (socket, data) => {
-  socket.broadcast.emit('chat', { user: socket.user.name, ...data });
+app.listen(3000, () => {
+    console.log('Server running on ws://localhost:3000');
 });
-
-app.on('save', async (socket, data, ack) => {
-  const result = await db.save(data);
-  ack({ success: true, id: result.id });
-});
-
-app.listen(3000);
 ```
 
-### Client
+### Client (Node.js)
 
 ```javascript
-const emit = require('emit.gg');
+const { EmitClient } = require('emit.gg');
 
-// One-liner connect
-const client = await emit.connect('ws://localhost:3000?token=abc');
-
-// Simple emit
-client.emit('chat', { message: 'Hello!' });
-
-// Request with response
-const result = await client.request('save', { name: 'Sam' });
-console.log(result); // { success: true, id: '...' }
+(async () => {
+    const socket = await EmitClient.connect('ws://localhost:3000');
+    
+    const result = await socket.request('/ping');
+    console.log(result);  // { pong: true, time: 1703602800000 }
+})();
 ```
-
----
 
 ## API Reference
 
-### Express-like App
+### Server
+
+#### EmitApp
 
 ```javascript
-const emit = require('emit.gg');
-const app = emit();
+const app = new EmitApp();
 ```
 
-#### `app.use(middleware)`
-
-Add middleware that runs on every new connection.
-
-```javascript
-// Logging
-app.use((socket, next) => {
-  console.log('Connected:', socket.id);
-  next();
-});
-
-// Auth
-app.use(async (socket, next) => {
-  if (!socket.query?.token) return socket.close();
-  socket.user = await auth(socket.query.token);
-  next();
-});
-
-// Attach disconnect handler
-app.use((socket, next) => {
-  socket.on('disconnect', () => {
-    console.log('Bye:', socket.id);
-  });
-  next();
-});
-```
-
-#### `app.on(event, handler)`
-
-Register an event handler. Handler receives `(socket, data, ack)`.
-
-```javascript
-// Simple handler
-app.on('chat', (socket, data) => {
-  socket.broadcast.emit('chat', data);
-});
-
-// With acknowledgment
-app.on('save', async (socket, data, ack) => {
-  const result = await db.save(data);
-  ack({ success: true, id: result.id });
-});
-
-// Access socket properties set by middleware
-app.on('profile', (socket, _, ack) => {
-  ack({ user: socket.user });
-});
-```
-
-#### `app.onAny(handler)`
-
-Catch-all handler for any event.
-
-```javascript
-app.onAny((socket, event, data) => {
-  console.log(`[${socket.id}] ${event}:`, data);
-});
-```
-
-#### `app.listen(port, [callback])`
-
-Start the server.
-
-```javascript
-app.listen(3000);
-
-app.listen(3000, () => {
-  console.log('Server running!');
-});
-
-// Attach to HTTP server
-const http = require('http');
-const server = http.createServer();
-app.listen({ server });
-server.listen(3000);
-```
-
-#### `app.emit(event, data)`
-
-Emit to all connected sockets.
-
-```javascript
-app.emit('announcement', { message: 'Server restarting...' });
-```
-
-#### `app.to(room).emit(event, data)`
-
-Emit to all sockets in a room.
-
-```javascript
-app.to('lobby').emit('message', { text: 'Hello room!' });
-```
-
-#### `app.namespace(prefix)` / `app.ns(prefix)`
-
-Create a namespace for grouping related handlers. Like Express Router!
-
-```javascript
-const room = app.namespace('room');
-
-room.on('join', (socket, data, ack) => { ... });   // Handles 'room:join'
-room.on('leave', (socket, data, ack) => { ... });  // Handles 'room:leave'
-room.on('message', (socket, data) => { ... });     // Handles 'room:message'
-```
-
-**Nested namespaces:**
-
-```javascript
-const admin = app.namespace('admin');
-const users = admin.namespace('users');
-
-users.on('list', handler);  // Handles 'admin:users:list'
-users.on('kick', handler);  // Handles 'admin:users:kick'
-```
-
-**Client usage:**
-
-```javascript
-// Events are prefixed automatically
-await client.request('room:join', { room: 'lobby' });
-await client.request('admin:users:list', { page: 1 });
-```
-
----
-
-### Client
-
-#### `emit.connect(url, [options])`
-
-Create and connect a client in one step.
-
-```javascript
-const client = await emit.connect('ws://localhost:3000');
-```
-
-#### `emit.client(url, [options])`
-
-Create a client without auto-connecting.
-
-```javascript
-const client = emit.client('ws://localhost:3000', {
-  autoReconnect: true,
-  reconnectInterval: 1000,
-  maxReconnectAttempts: 10
-});
-
-await client.connect();
-```
-
-#### Client Methods
+##### Methods
 
 | Method | Description |
 |--------|-------------|
-| `connect()` | Connect (returns Promise) |
-| `emit(event, data)` | Send event to server |
-| `request(event, data)` | Send and wait for response (returns Promise) |
-| `on(event, callback)` | Listen for events |
-| `once(event, callback)` | Listen once |
-| `waitFor(event)` | Wait for event (returns Promise) |
-| `disconnect()` | Disconnect |
+| `app.on(event, handler)` | Register event handler |
+| `app.on(event, middleware, handler)` | Handler with middleware |
+| `app.use(fn)` | Add global middleware |
+| `app.plugin(fn)` | Add plugin |
+| `app.ns(prefix)` | Create namespace |
+| `app.broadcast(event, options)` | Broadcast to all sockets |
+| `app.listen(port, callback)` | Start server |
+| `app.close()` | Close server |
 
-#### Client Events
+##### System Events
 
-```javascript
-client.on('connect', () => { });
-client.on('disconnect', () => { });
-client.on('reconnecting', ({ attempt }) => { });
-client.on('reconnect_failed', () => { });
-client.on('error', (err) => { });
-```
+| Event | Description |
+|-------|-------------|
+| `@connection` | Socket connected |
+| `@disconnect` | Socket disconnected |
+| `@error` | Error occurred |
+| `@any` | Catch-all for any event |
+| `@ping` | Heartbeat ping (with plugin) |
 
----
+#### Request Object (req)
 
-### Socket (Server-side)
-
-Available in handlers and middleware:
-
-| Property/Method | Description |
-|-----------------|-------------|
-| `socket.id` | Unique identifier |
-| `socket.query` | URL query params |
-| `socket.user` | Custom property (set in middleware) |
-| `socket.emit(event, data)` | Send to this socket |
-| `socket.broadcast.emit(event, data)` | Send to all except this socket |
-| `socket.join(room)` | Join a room |
-| `socket.leave(room)` | Leave a room |
-| `socket.to(room).emit(event, data)` | Send to room |
-| `socket.rooms` | Set of joined rooms |
-
----
-
-## Request/Response Pattern
-
-The killer feature! No more managing separate events:
+Every handler receives a `req` object:
 
 ```javascript
-// Client
-const user = await client.request('get-user', { id: 123 });
-
-// Server
-app.on('get-user', async (socket, data, ack) => {
-  const user = await db.findById(data.id);
-  ack(user);
+app.on('/message', (req) => {
+    req.event      // Event name: '/message'
+    req.data       // Data sent by client
+    req.socket     // The socket that sent this
+    req.app        // The EmitApp instance
+    
+    req.set(key, value)          // Store data on socket
+    req.get(key)                 // Get stored data
+    req.join('#room')            // Join a room
+    req.leave('#room')           // Leave a room
+    req.reply(data)              // Reply to client
+    req.broadcast(event, opts)   // Broadcast to others
 });
 ```
 
----
+#### Socket
+
+Access the underlying socket via `req.socket`:
+
+```javascript
+req.socket.id            // Unique socket ID
+req.socket.data          // Custom data storage (use req.set/get instead)
+req.socket.rooms         // Set of rooms joined
+req.socket.emit(event, data)   // Send event to this socket
+```
+
+### Client
+
+#### EmitClient
+
+```javascript
+const socket = await EmitClient.connect(url, options);
+```
+
+##### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `reconnect` | `false` | Auto-reconnect on disconnect |
+| `reconnectDelay` | `1000` | Delay between reconnect attempts (ms) |
+| `maxRetries` | `10` | Maximum reconnect attempts |
+| `connectTimeout` | `10000` | Connection timeout (ms) |
+
+##### Methods
+
+| Method | Description |
+|--------|-------------|
+| `socket.emit(event, data)` | Fire and forget |
+| `socket.request(event, data, opts)` | Request with response |
+| `socket.on(event, callback)` | Listen for events |
+| `socket.off(event, callback)` | Remove listener |
+| `socket.ns(prefix)` | Create namespace |
+| `socket.close()` | Disconnect |
+| `socket.connected` | Connection status |
+
+##### System Events
+
+| Event | Description |
+|-------|-------------|
+| `@connection` | Connected to server |
+| `@disconnect` | Disconnected from server |
+| `@reconnect` | Reconnected after disconnect |
+| `@error` | Connection error |
+| `@any` | Catch-all for any event |
+
+## Middleware
+
+### Global Middleware
+
+Runs for all events:
+
+```javascript
+app.use((req, next) => {
+    console.log(`${req.socket.id} -> ${req.event}`);
+    next();
+});
+```
+
+### Route Middleware
+
+Runs for specific events:
+
+```javascript
+const auth = (req, next) => {
+    if (!req.get('user')) {
+        req.reply({ error: 'Unauthorized' });
+        return;
+    }
+    next();
+};
+
+app.on('/profile', auth, (req) => {
+    req.reply({ user: req.get('user') });
+});
+
+// Multiple middleware
+app.on('/admin', [auth, adminOnly], (req) => {
+    req.reply({ admin: true });
+});
+```
 
 ## Rooms
 
 ```javascript
-app.on('join', (socket, data) => {
-  socket.join(data.room);
-  socket.to(data.room).emit('user:joined', { id: socket.id });
+// Join a room
+app.on('/join', (req) => {
+    req.join('#' + req.data.room);
+    
+    // Notify others in room
+    req.broadcast('user-joined', {
+        data: { id: req.socket.id },
+        to: '#' + req.data.room
+    });
+    
+    req.reply({ joined: req.data.room });
 });
 
-app.on('room:message', (socket, data) => {
-  socket.to(data.room).emit('message', {
-    from: socket.id,
-    text: data.text
-  });
+// Broadcast to room
+app.on('/message', (req) => {
+    req.broadcast('message', {
+        data: { text: req.data.text },
+        to: '#' + req.data.room,
+        includeSelf: true  // Include sender
+    });
+});
+
+// App-level broadcast
+app.broadcast('announcement', {
+    data: { message: 'Server restarting!' },
+    to: '#general'
 });
 ```
 
----
+## Namespaces
 
-## Direct API (without Express-style)
-
-If you prefer a simpler setup:
+Organize events with prefixes:
 
 ```javascript
-const emit = require('emit.gg');
+// Server
+const chat = app.ns('/chat');
+chat.on('/message', (req) => { ... });  // Handles '/chat/message'
+chat.on('/typing', (req) => { ... });   // Handles '/chat/typing'
 
-// Quick server
-emit.server(3000, (socket) => {
-  socket.on('chat', (data) => {
-    socket.broadcast.emit('chat', data);
-  });
+const game = app.ns('/game');
+game.on('/move', (req) => { ... });     // Handles '/game/move'
+
+// Nested namespaces
+const lobby = game.ns('/lobby');
+lobby.on('/join', (req) => { ... });    // Handles '/game/lobby/join'
+```
+
+```javascript
+// Client
+const chat = socket.ns('/chat');
+await chat.request('/message', { text: 'Hello!' });
+```
+
+## Plugins
+
+### Using Plugins
+
+```javascript
+const { EmitApp } = require('emit.gg');
+const heartbeat = require('emit.gg/src/plugins/heartbeat');
+
+const app = new EmitApp();
+
+app.plugin(heartbeat({ interval: 30000 }));
+
+// Multiple plugins
+app.plugin([
+    heartbeat({ interval: 30000 }),
+    myPlugin({ option: true })
+]);
+```
+
+### Creating Plugins
+
+```javascript
+// my-plugin.js
+module.exports = ({ option = false } = {}) => {
+    return (app) => {
+        app.use((req, next) => {
+            // Plugin logic
+            next();
+        });
+        
+        app.on('@connection', (req) => {
+            // Setup on connection
+        });
+    };
+};
+```
+
+### Built-in Plugins
+
+#### Heartbeat
+
+Keeps connections alive with ping/pong:
+
+```javascript
+const heartbeat = require('emit.gg/src/plugins/heartbeat');
+
+app.plugin(heartbeat({ interval: 30000 }));
+
+app.on('@ping', (req) => {
+    console.log('Heartbeat:', req.socket.id);
+});
+```
+
+## Symbols
+
+| Symbol | Meaning | Example |
+|--------|---------|---------|
+| `@` | System event | `@connection`, `@disconnect` |
+| `/` | User event | `/ping`, `/message` |
+| `#` | Room | `#general`, `#game-123` |
+
+## Examples
+
+### Chat Application
+
+```javascript
+// Server
+const { EmitApp } = require('emit.gg');
+const heartbeat = require('emit.gg/src/plugins/heartbeat');
+
+const app = new EmitApp();
+app.plugin(heartbeat({ interval: 30000 }));
+
+app.on('@connection', (req) => {
+    console.log('Connected:', req.socket.id);
 });
 
-// Quick client
-const client = await emit.connect('ws://localhost:3000');
-client.emit('chat', 'Hello!');
+app.on('/join', (req) => {
+    req.set('username', req.data.username);
+    req.join('#chat');
+    
+    req.broadcast('user-joined', {
+        data: { username: req.data.username },
+        to: '#chat'
+    });
+    
+    req.reply({ joined: true });
+});
+
+app.on('/message', (req) => {
+    req.broadcast('message', {
+        data: {
+            username: req.get('username'),
+            text: req.data.text
+        },
+        to: '#chat',
+        includeSelf: true
+    });
+});
+
+app.listen(3000);
 ```
 
----
+```javascript
+// Client
+const { EmitClient } = require('emit.gg');
 
-## Debug Mode
-
-```bash
-DEBUG=emit.gg node app.js
+(async () => {
+    const socket = await EmitClient.connect('ws://localhost:3000', {
+        reconnect: true
+    });
+    
+    await socket.request('/join', { username: 'Alice' });
+    
+    socket.on('message', (data) => {
+        console.log(`${data.username}: ${data.text}`);
+    });
+    
+    socket.emit('/message', { text: 'Hello everyone!' });
+})();
 ```
-
----
-
-## Comparison
-
-| Feature | emit.gg | Express | Socket.IO |
-|---------|---------|---------|-----------|
-| Middleware | ✅ | ✅ | ✅ |
-| `app.on()` routes | ✅ | ✅ (.get, .post) | ❌ |
-| Namespaces | ✅ | ✅ (Router) | ✅ |
-| Request/Response | ✅ | ✅ | ✅ |
-| Promise API | ✅ | ❌ | ❌ |
-| Bundle size | ~5KB | ~200KB | ~40KB |
-
----
 
 ## License
 

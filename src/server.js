@@ -195,6 +195,22 @@ class EmitSocket {
             socket: this,
             app: this.app,
 
+            // Shortcut to set/get socket data
+            set: (key, value) => {
+                socket.data[key] = value;
+            },
+            get: (key) => {
+                return socket.data[key];
+            },
+
+            // Shortcut for room management
+            join: (room) => {
+                socket.join(room);
+            },
+            leave: (room) => {
+                socket.leave(room);
+            },
+
             reply: ackId
                 ? (res) => this.ws.send(JSON.stringify({ type: 'ack', ackId, data: res }))
                 : () => { },

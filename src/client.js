@@ -132,6 +132,15 @@ class EmitClient {
         return this;
     }
 
+    set(key, value) {
+        this.data[key] = value;
+        return this;
+    }
+
+    get(key) {
+        return this.data[key];
+    }
+
     emit(event, data) {
         if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({ event, data }));
