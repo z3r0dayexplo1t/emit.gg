@@ -3,3 +3,8 @@ coverage/
 *.log
 .DS_Store
 dist/
+examples/
+learn/
+.gitignore
+.npmignore
+
