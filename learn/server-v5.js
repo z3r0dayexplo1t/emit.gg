@@ -2,12 +2,26 @@ const { WebSocketServer } = require('ws');
 
 // ============ EMIT APP ============
 class EmitApp {
-    constructor(options = {}) {
+    constructor() {
         this.handlers = new Map();
         this.rooms = new Map();
         this.sockets = new Set();
         this.middleware = [];
-        this.heartbeatInterval = options.heartbeat || 30000;
+    }
+
+    plugin(plugins, options = {}) {
+        if (Array.isArray(plugins)) {
+            plugins.forEach(p => {
+                if (Array.isArray(p)) {
+                    p[0](this, p[1] || {});
+                } else {
+                    p(this, {});
+                }
+            });
+        } else {
+            plugins(this, options);
+        }
+        return this;
     }
 
     use(fn) {
@@ -78,9 +92,6 @@ class EmitApp {
 
     close() {
         return new Promise((resolve) => {
-            // Clear all heartbeats
-            this.sockets.forEach(socket => socket._clearHeartbeat());
-
             this.wss.close(() => {
                 resolve();
             });
@@ -114,9 +125,6 @@ class EmitSocket {
         this.pendingRequests = new Map();
         this.rooms = new Set();
         this.data = {};
-        this.isAlive = true;
-
-        this._setupHeartbeat();
 
         ws.on('message', (raw) => {
             const message = JSON.parse(raw.toString());
@@ -124,7 +132,6 @@ class EmitSocket {
         });
 
         ws.on('close', () => {
-            this._clearHeartbeat();
             this.app._leaveAllRooms(this);
             this.app.sockets.delete(this);
 
@@ -133,33 +140,9 @@ class EmitSocket {
                 handler({ socket: this, app: this.app });
             }
         });
-
-        ws.on('pong', () => {
-            this.isAlive = true;
-        });
     }
 
-    _setupHeartbeat() {
-        this.heartbeatTimer = setInterval(() => {
-            if (!this.isAlive) {
-                this.ws.terminate();
-                return;
-            }
-            this.isAlive = false;
-            this.ws.ping();
 
-            const pingHandler = this.app.handlers.get('@ping');
-            if (pingHandler) {
-                pingHandler({ socket: this, app: this.app });
-            }
-        }, this.app.heartbeatInterval);
-    }
-
-    _clearHeartbeat() {
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-        }
-    }
 
     join(room) {
         if (!room.startsWith('#')) room = '#' + room;
