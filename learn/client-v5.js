@@ -1,52 +1,111 @@
 const WebSocket = require('ws');
 
 class EmitClient {
-    constructor(ws) {
+    constructor(ws, options = {}) {
         this.ws = ws;
+        this.url = ws.url;
+        this.options = options;
         this.listeners = new Map();
         this.pendingRequests = new Map();
+        this.data = {};
+        this.reconnectAttempts = 0;
 
-        ws.on('message', (raw) => {
+        this._setupListeners();
+    }
+
+    static connect(url, options = {}) {
+        return new Promise((resolve, reject) => {
+            const timeout = options.connectTimeout || 10000;
+
+            const timer = setTimeout(() => {
+                reject(new Error('Connection timeout'));
+            }, timeout);
+
+            const ws = new WebSocket(url);
+
+            ws.on('open', () => {
+                clearTimeout(timer);
+                const client = new EmitClient(ws, { ...options, url });
+                client._callListeners('@connection', {});
+                resolve(client);
+            });
+
+            ws.on('error', (err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+        });
+    }
+
+    _setupListeners() {
+        this.ws.on('message', (raw) => {
             const message = JSON.parse(raw.toString());
             this._handleMessage(message);
         });
 
-        ws.on('close', () => {
+        this.ws.on('close', () => {
             this._callListeners('@disconnect', {});
+
+            // Auto-reconnect if enabled
+            if (this.options.reconnect) {
+                this._attemptReconnect();
+            }
+        });
+
+        this.ws.on('error', (err) => {
+            this._callListeners('@error', { error: err.message });
         });
     }
 
-    // Static method for clean connection
-    static connect(url) {
-        return new Promise((resolve, reject) => {
-            const ws = new WebSocket(url);
+    _attemptReconnect() {
+        const maxRetries = this.options.maxRetries || 10;
+        const delay = this.options.reconnectDelay || 1000;
 
-            ws.on('open', () => {
-                const client = new EmitClient(ws);
-                resolve(client);
-                client._callListeners('@connection', {});
-            });
+        if (this.reconnectAttempts >= maxRetries) {
+            this._callListeners('@error', { error: 'Max reconnect attempts reached' });
+            return;
+        }
 
-            ws.on('error', (err) => {
-                reject(err);
-                client._callListeners('@error', { error: err });
-            });
-        });
+        this.reconnectAttempts++;
+
+        setTimeout(async () => {
+            try {
+                const ws = new WebSocket(this.options.url);
+
+                ws.on('open', () => {
+                    this.ws = ws;
+                    this.reconnectAttempts = 0;
+                    this._setupListeners();
+                    this._callListeners('@reconnect', {});
+                });
+
+                ws.on('error', () => {
+                    this._attemptReconnect();
+                });
+            } catch (err) {
+                this._attemptReconnect();
+            }
+        }, delay);
     }
 
     _handleMessage(message) {
-        // Is this an ACK response to a request we made?
+        // ACK response
         if (message.type === 'ack') {
             const pending = this.pendingRequests.get(message.ackId);
             if (pending) {
+                clearTimeout(pending.timer);
                 pending.resolve(message.data);
                 this.pendingRequests.delete(message.ackId);
             }
             return;
         }
 
-        // Regular event from server
         const { event, data } = message;
+
+        // Call @any handler first
+        this._callListeners('@any', { event, data });
+
+        // Call specific handler
         this._callListeners(event, data);
     }
 
@@ -57,7 +116,6 @@ class EmitClient {
         }
     }
 
-    // Listen for server-pushed events
     on(event, callback) {
         if (!this.listeners.has(event)) {
             this.listeners.set(event, []);
@@ -66,45 +124,55 @@ class EmitClient {
         return this;
     }
 
-    // Fire and forget
-    emit(event, data) {
-        this.ws.send(JSON.stringify({ event, data }));
+    off(event, callback) {
+        const handlers = this.listeners.get(event);
+        if (handlers) {
+            const index = handlers.indexOf(callback);
+            if (index > -1) handlers.splice(index, 1);
+        }
         return this;
     }
 
-    // Request with response (returns Promise)
-    request(event, data) {
+    emit(event, data) {
+        if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ event, data }));
+        }
+        return this;
+    }
+
+    request(event, data, options = {}) {
         return new Promise((resolve, reject) => {
+            if (this.ws.readyState !== WebSocket.OPEN) {
+                return reject(new Error('Not connected'));
+            }
+
+            const timeout = options.timeout || 10000;
             const ackId = Math.random().toString(36).slice(2, 10);
 
-            // Timeout after 10 seconds
             const timer = setTimeout(() => {
                 this.pendingRequests.delete(ackId);
                 reject(new Error(`Request timeout: ${event}`));
-            }, 10000);
+            }, timeout);
 
-            this.pendingRequests.set(ackId, {
-                resolve: (data) => {
-                    clearTimeout(timer);
-                    resolve(data);
-                }
-            });
-
+            this.pendingRequests.set(ackId, { resolve, timer });
             this.ws.send(JSON.stringify({ event, data, ackId }));
         });
     }
 
-    // Create a namespace (for organization)
     ns(prefix) {
         return new ClientNamespace(this, prefix);
     }
 
     close() {
+        this.options.reconnect = false;  // Disable reconnect
         this.ws.close();
+    }
+
+    get connected() {
+        return this.ws.readyState === WebSocket.OPEN;
     }
 }
 
-// Client-side namespace (mirrors server)
 class ClientNamespace {
     constructor(client, prefix) {
         this.client = client;
@@ -116,8 +184,8 @@ class ClientNamespace {
         return this;
     }
 
-    request(event, data) {
-        return this.client.request(this.prefix + event, data);
+    request(event, data, options) {
+        return this.client.request(this.prefix + event, data, options);
     }
 
     on(event, callback) {
@@ -125,7 +193,6 @@ class ClientNamespace {
         return this;
     }
 
-    // Nested namespace
     ns(prefix) {
         return new ClientNamespace(this.client, this.prefix + prefix);
     }
