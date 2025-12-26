@@ -1,262 +1,200 @@
 /**
  * emit.gg - Client
- * Lean WebSocket client with event-based messaging
- * Works in both browser and Node.js environments
+ * WebSocket client with auto-reconnect and namespaces
  */
 
-const { MessageType, encode, encodeAck, decode, generateId, createDebug } = require('./utils');
-
-const debug = createDebug('emit:client');
-
-
+const WebSocket = require('ws');
 
 class EmitClient {
+    constructor(ws, options = {}) {
+        this.ws = ws;
+        this.url = ws.url;
+        this.options = options;
+        this.listeners = new Map();
+        this.pendingRequests = new Map();
+        this.data = {};
+        this.reconnectAttempts = 0;
 
-    constructor(url, options = {}) {
-        this.url = url;
-        this.options = {
-            autoReconnect: true,
-            reconnectInterval: 1000,
-            maxReconnectAttempts: 10,
-            ackTimeout: 10000,
-            protocols: undefined,
-            ...options
-        };
-
-        this.id = generateId();
-        this.ws = null;
-        this._listeners = new Map();
-        this._pendingAcks = new Map();
-        this._reconnectAttempts = 0;
-        this._reconnectTimer = null;
-        this._connected = false;
-        this._intentionalClose = false;
-        this._connectPromise = null;
+        this._setupListeners();
     }
 
+    static connect(url, options = {}) {
+        return new Promise((resolve, reject) => {
+            const timeout = options.connectTimeout || 10000;
 
-    connect() {
-        if (this._connectPromise) {
-            return this._connectPromise;
-        }
+            const timer = setTimeout(() => {
+                reject(new Error('Connection timeout'));
+            }, timeout);
 
-        this._intentionalClose = false;
+            const ws = new WebSocket(url);
 
-        this._connectPromise = new Promise((resolve, reject) => {
-            this._connectResolve = resolve;
-            this._connectReject = reject;
-            this._createConnection();
+            ws.on('open', () => {
+                clearTimeout(timer);
+                const client = new EmitClient(ws, { ...options, url });
+                client._callListeners('@connection', {});
+                resolve(client);
+            });
+
+            ws.on('error', (err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+        });
+    }
+
+    _setupListeners() {
+        this.ws.on('message', (raw) => {
+            const message = JSON.parse(raw.toString());
+            this._handleMessage(message);
         });
 
-        return this._connectPromise;
+        this.ws.on('close', () => {
+            this._callListeners('@disconnect', {});
+
+            if (this.options.reconnect) {
+                this._attemptReconnect();
+            }
+        });
+
+        this.ws.on('error', (err) => {
+            this._callListeners('@error', { error: err.message });
+        });
     }
 
-    _createConnection() {
-        // Use native WebSocket in browser, or ws in Node.js
-        const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
+    _attemptReconnect() {
+        const maxRetries = this.options.maxRetries || 10;
+        const delay = this.options.reconnectDelay || 1000;
 
-        try {
-            this.ws = new WS(this.url, this.options.protocols);
-            debug(`connecting to ${this.url}`);
-        } catch (err) {
-            debug('connection error:', err.message);
-            this._emitLocal('error', err);
-            this._scheduleReconnect();
+        if (this.reconnectAttempts >= maxRetries) {
+            this._callListeners('@error', { error: 'Max reconnect attempts reached' });
             return;
         }
 
-        this.ws.onopen = () => {
-            this._connected = true;
-            this._reconnectAttempts = 0;
-            debug('connected');
-            this._emitLocal('connect');
-            this._connectResolve?.();
-            this._connectPromise = null;
-        };
+        this.reconnectAttempts++;
 
-        this.ws.onmessage = (event) => {
-            const message = decode(event.data);
-            if (!message) return;
+        setTimeout(async () => {
+            try {
+                const ws = new WebSocket(this.options.url);
 
-            if (message.type === MessageType.ACK) {
-                // Handle acknowledgment response
-                const pending = this._pendingAcks.get(message.ackId);
-                if (pending) {
-                    clearTimeout(pending.timer);
-                    pending.resolve(message.data);
-                    this._pendingAcks.delete(message.ackId);
-                    debug(`ack received: ${message.ackId}`);
-                }
-                return;
+                ws.on('open', () => {
+                    this.ws = ws;
+                    this.reconnectAttempts = 0;
+                    this._setupListeners();
+                    this._callListeners('@reconnect', {});
+                });
+
+                ws.on('error', () => {
+                    this._attemptReconnect();
+                });
+            } catch (err) {
+                this._attemptReconnect();
             }
-
-            const { event: eventName, data, ackId } = message;
-            debug(`event received: ${eventName}`);
-
-            // Create ack callback if requested
-            const ack = ackId ? (response) => {
-                if (this.ws?.readyState === 1) {
-                    this.ws.send(encodeAck(ackId, response));
-                    debug(`ack sent: ${ackId}`);
-                }
-            } : undefined;
-
-            this._emitLocal(eventName, data, ack);
-        };
-
-        this.ws.onclose = (event) => {
-            this._connected = false;
-            debug(`disconnected (code: ${event.code})`);
-            this._emitLocal('disconnect', { code: event.code, reason: event.reason });
-
-            if (!this._intentionalClose) {
-                this._scheduleReconnect();
-            }
-        };
-
-        this.ws.onerror = (err) => {
-            debug('error:', err.message || 'unknown');
-            this._emitLocal('error', err);
-
-            // Reject connect promise on first connection failure
-            if (this._connectReject && this._reconnectAttempts === 0) {
-                this._connectReject(err);
-                this._connectPromise = null;
-            }
-        };
+        }, delay);
     }
 
-    _scheduleReconnect() {
-        if (!this.options.autoReconnect) return;
-        if (this.options.maxReconnectAttempts > 0 &&
-            this._reconnectAttempts >= this.options.maxReconnectAttempts) {
-            debug('max reconnect attempts reached');
-            this._emitLocal('reconnect_failed');
+    _handleMessage(message) {
+        if (message.type === 'ack') {
+            const pending = this.pendingRequests.get(message.ackId);
+            if (pending) {
+                clearTimeout(pending.timer);
+                pending.resolve(message.data);
+                this.pendingRequests.delete(message.ackId);
+            }
             return;
         }
 
-        this._reconnectAttempts++;
-        debug(`reconnecting (attempt ${this._reconnectAttempts})`);
-        this._emitLocal('reconnecting', { attempt: this._reconnectAttempts });
-
-        this._reconnectTimer = setTimeout(() => {
-            this._createConnection();
-        }, this.options.reconnectInterval);
+        const { event, data } = message;
+        this._callListeners('@any', { event, data });
+        this._callListeners(event, data);
     }
 
-    _emitLocal(event, data, ack) {
-        const listeners = this._listeners.get(event);
-        if (listeners) {
-            listeners.forEach(fn => fn(data, ack));
+    _callListeners(event, data) {
+        const handlers = this.listeners.get(event);
+        if (handlers) {
+            handlers.forEach(fn => fn(data));
         }
     }
+
     on(event, callback) {
-        if (!this._listeners.has(event)) {
-            this._listeners.set(event, []);
+        if (!this.listeners.has(event)) {
+            this.listeners.set(event, []);
         }
-        this._listeners.get(event).push(callback);
+        this.listeners.get(event).push(callback);
         return this;
     }
-    once(event, callback) {
-        const onceWrapper = (data, ack) => {
-            this.off(event, onceWrapper);
-            callback(data, ack);
-        };
-        return this.on(event, onceWrapper);
-    }
-
-    waitFor(event, timeout = 0) {
-        return new Promise((resolve, reject) => {
-            let timer;
-
-            const handler = (data) => {
-                if (timer) clearTimeout(timer);
-                resolve(data);
-            };
-
-            this.once(event, handler);
-
-            if (timeout > 0) {
-                timer = setTimeout(() => {
-                    this.off(event, handler);
-                    reject(new Error(`Timeout waiting for event: ${event}`));
-                }, timeout);
-            }
-        });
-    }
-
 
     off(event, callback) {
-        const listeners = this._listeners.get(event);
-        if (listeners) {
-            const index = listeners.indexOf(callback);
-            if (index > -1) {
-                listeners.splice(index, 1);
-            }
+        const handlers = this.listeners.get(event);
+        if (handlers) {
+            const index = handlers.indexOf(callback);
+            if (index > -1) handlers.splice(index, 1);
         }
         return this;
     }
-
-
-    removeAllListeners(event) {
-        if (event) {
-            this._listeners.delete(event);
-        } else {
-            this._listeners.clear();
-        }
-        return this;
-    }
-
 
     emit(event, data) {
-        if (this.ws?.readyState === 1) {
-            this.ws.send(encode(event, data));
-            debug(`emit: ${event}`);
+        if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ event, data }));
         }
         return this;
     }
 
-
-    request(event, data, timeout) {
+    request(event, data, options = {}) {
         return new Promise((resolve, reject) => {
-            if (!this.ws || this.ws.readyState !== 1) {
+            if (this.ws.readyState !== WebSocket.OPEN) {
                 return reject(new Error('Not connected'));
             }
 
-            const ackId = generateId();
-            const ackTimeout = timeout ?? this.options.ackTimeout;
+            const timeout = options.timeout || 10000;
+            const ackId = Math.random().toString(36).slice(2, 10);
 
             const timer = setTimeout(() => {
-                this._pendingAcks.delete(ackId);
+                this.pendingRequests.delete(ackId);
                 reject(new Error(`Request timeout: ${event}`));
-            }, ackTimeout);
+            }, timeout);
 
-            this._pendingAcks.set(ackId, { resolve, reject, timer });
-            this.ws.send(encode(event, data, ackId));
-            debug(`request: ${event} (ack: ${ackId})`);
+            this.pendingRequests.set(ackId, { resolve, timer });
+            this.ws.send(JSON.stringify({ event, data, ackId }));
         });
     }
 
+    ns(prefix) {
+        return new ClientNamespace(this, prefix);
+    }
+
+    close() {
+        this.options.reconnect = false;
+        this.ws.close();
+    }
+
     get connected() {
-        return this._connected;
-    }
-
-    disconnect(code, reason) {
-        this._intentionalClose = true;
-        if (this._reconnectTimer) {
-            clearTimeout(this._reconnectTimer);
-            this._reconnectTimer = null;
-        }
-        if (this.ws) {
-            this.ws.close(code, reason);
-        }
-        debug('disconnected (intentional)');
-        return this;
-    }
-
-    close(code, reason) {
-        return this.disconnect(code, reason);
+        return this.ws.readyState === WebSocket.OPEN;
     }
 }
 
-module.exports = { EmitClient };
+class ClientNamespace {
+    constructor(client, prefix) {
+        this.client = client;
+        this.prefix = prefix;
+    }
+
+    emit(event, data) {
+        this.client.emit(this.prefix + event, data);
+        return this;
+    }
+
+    request(event, data, options) {
+        return this.client.request(this.prefix + event, data, options);
+    }
+
+    on(event, callback) {
+        this.client.on(this.prefix + event, callback);
+        return this;
+    }
+
+    ns(prefix) {
+        return new ClientNamespace(this.client, this.prefix + prefix);
+    }
+}
+
+module.exports = { EmitClient, ClientNamespace };

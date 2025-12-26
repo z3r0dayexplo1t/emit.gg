@@ -9,17 +9,11 @@ class EmitApp {
         this.middleware = [];
     }
 
-    plugin(plugins, options = {}) {
+    plugin(plugins) {
         if (Array.isArray(plugins)) {
-            plugins.forEach(p => {
-                if (Array.isArray(p)) {
-                    p[0](this, p[1] || {});
-                } else {
-                    p(this, {});
-                }
-            });
+            plugins.forEach(fn => fn(this));
         } else {
-            plugins(this, options);
+            plugins(this);
         }
         return this;
     }

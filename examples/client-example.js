@@ -1,70 +1,57 @@
 /**
- * emit.gg - Node.js Client Example
- * Run with: node examples/client-example.js
- * Debug:    DEBUG=emit.gg node examples/client-example.js
+ * emit.gg - Client Example (Node.js)
  */
 
-const emit = require('../src');
+const { EmitClient } = require('../src');
 
-async function main() {
-    console.log('Connecting to ws://localhost:3000...\n');
-
-    // One-liner connect!
-    const client = await emit.connect('ws://localhost:3000');
-
-    console.log('✓ Connected!\n');
-
-    // Listen for events
-    client.on('welcome', (data) => {
-        console.log(`  ${data.message}`);
-        console.log(`  Your ID: ${data.yourId}\n`);
+(async () => {
+    const socket = await EmitClient.connect('ws://localhost:3000', {
+        reconnect: true,
+        reconnectDelay: 2000,
+        maxRetries: 5
     });
 
-    client.on('chat', (data) => {
-        console.log(`[Chat] ${data.from}: ${data.message}`);
+    // System events
+    socket.on('@connection', () => {
+        console.log('Connected to server');
     });
 
-    client.on('disconnect', () => {
-        console.log('\n✗ Disconnected');
+    socket.on('@disconnect', () => {
+        console.log('Disconnected, attempting reconnect...');
     });
 
-    // --- Demo: Ping ---
-    console.log('Testing latency...');
-    const start = Date.now();
-    const pong = await client.request('ping');
-    console.log(`  Latency: ${Date.now() - start}ms\n`);
-
-    // --- Demo: Save data ---
-    console.log('Saving data...');
-    const result = await client.request('save-data', {
-        name: 'Test Item',
-        value: 42
+    socket.on('@reconnect', () => {
+        console.log('Reconnected!');
     });
-    console.log(`  Saved! ID: ${result.id}\n`);
 
-    // --- Demo: Chat with ack ---
-    console.log('Sending chat message...');
-    const chatResult = await client.request('chat:send', {
-        message: 'Hello from Node.js client!'
+    socket.on('@error', (err) => {
+        console.log('Error:', err.error);
     });
-    console.log(`  Delivered: ${chatResult.delivered}\n`);
 
-    // --- Demo: Join room ---
-    console.log('Joining room...');
-    const roomResult = await client.request('room:join', { room: 'lobby' });
-    console.log(`  Joined: ${roomResult.joined}\n`);
+    // Ping
+    const pong = await socket.request('/ping');
+    console.log('Ping response:', pong);
 
-    console.log('Listening for events... (Ctrl+C to exit)\n');
+    // Join a room
+    const joinResult = await socket.request('/join', { room: 'general' });
+    console.log('Joined:', joinResult);
 
-    // Graceful shutdown
-    process.on('SIGINT', () => {
-        console.log('\nDisconnecting...');
-        client.disconnect();
-        process.exit(0);
+    // Listen for messages
+    socket.on('message', (data) => {
+        console.log(`[${data.from}]: ${data.text}`);
     });
-}
 
-main().catch(err => {
-    console.error('Failed:', err.message);
-    process.exit(1);
-});
+    socket.on('user-joined', (data) => {
+        console.log(`${data.id} joined the room`);
+    });
+
+    // Send a message
+    socket.emit('/message', { room: 'general', text: 'Hello everyone!' });
+
+    // Using namespaces
+    const chat = socket.ns('/chat');
+    // chat.emit('/typing', {});
+    // const messages = await chat.request('/history', { limit: 50 });
+
+    console.log('Connected:', socket.connected);
+})();

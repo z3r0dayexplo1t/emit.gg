@@ -1,208 +1,57 @@
 /**
  * emit.gg - Server
- * Lean WebSocket server with event-based messaging
+ * Clean WebSocket framework with Express-like API
  */
 
 const { WebSocketServer } = require('ws');
-const { MessageType, encode, encodeAck, decode, generateId, createDebug } = require('./utils');
 
-const debug = createDebug('emit:server');
-
-
-class EmitSocket {
-    constructor(ws, server) {
-        this.ws = ws;
-        this.server = server;
-        this.id = generateId();
-        this.rooms = new Set();
-        this._listeners = new Map();
-        this._pendingAcks = new Map();
-
-        this._setupHandlers();
-        debug(`socket created: ${this.id}`);
-    }
-
-    _setupHandlers() {
-        this.ws.on('message', (raw) => {
-            const message = decode(raw.toString());
-            if (!message) return;
-
-            if (message.type === MessageType.ACK) {
-                // Handle acknowledgment response
-                const pending = this._pendingAcks.get(message.ackId);
-                if (pending) {
-                    clearTimeout(pending.timer);
-                    pending.resolve(message.data);
-                    this._pendingAcks.delete(message.ackId);
-                    debug(`ack received: ${message.ackId}`);
-                }
-                return;
-            }
-
-            const { event, data, ackId } = message;
-            debug(`event received: ${event}`, data);
-
-            // Create ack callback if requested
-            const ack = ackId ? (response) => {
-                if (this.ws.readyState === 1) {
-                    this.ws.send(encodeAck(ackId, response));
-                    debug(`ack sent: ${ackId}`);
-                }
-            } : undefined;
-
-            // Call registered listeners
-            const listeners = this._listeners.get(event);
-            if (listeners) {
-                listeners.forEach(fn => fn(data, ack));
-            }
-
-            // Also emit on server for global listeners
-            this.server._emitLocal(event, data, this, ack);
-        });
-
-        this.ws.on('close', () => {
-            debug(`socket closed: ${this.id}`);
-            this.rooms.forEach(room => this.leave(room));
-            this.server._removeSocket(this);
-            this._emitLocal('disconnect');
-        });
-
-        this.ws.on('error', (err) => {
-            debug(`socket error: ${this.id}`, err.message);
-            this._emitLocal('error', err);
-        });
-    }
-
-    /** @private */
-    _emitLocal(event, data) {
-        const listeners = this._listeners.get(event);
-        if (listeners) {
-            listeners.forEach(fn => fn(data));
-        }
-    }
-
-    on(event, callback) {
-        if (!this._listeners.has(event)) {
-            this._listeners.set(event, []);
-        }
-        this._listeners.get(event).push(callback);
-        return this;
-    }
-    off(event, callback) {
-        const listeners = this._listeners.get(event);
-        if (listeners) {
-            const index = listeners.indexOf(callback);
-            if (index > -1) {
-                listeners.splice(index, 1);
-            }
-        }
-        return this;
-    }
-
-    emit(event, data) {
-        if (this.ws.readyState === 1) {
-            this.ws.send(encode(event, data));
-            debug(`emit to ${this.id}: ${event}`);
-        }
-        return this;
-    }
-
-    request(event, data, timeout = 10000) {
-        return new Promise((resolve, reject) => {
-            if (this.ws.readyState !== 1) {
-                return reject(new Error('Socket not connected'));
-            }
-
-            const ackId = generateId();
-            const timer = setTimeout(() => {
-                this._pendingAcks.delete(ackId);
-                reject(new Error(`Request timeout: ${event}`));
-            }, timeout);
-
-            this._pendingAcks.set(ackId, { resolve, timer });
-            this.ws.send(encode(event, data, ackId));
-            debug(`request to ${this.id}: ${event} (ack: ${ackId})`);
-        });
-    }
-
-    join(room) {
-        this.rooms.add(room);
-        this.server._joinRoom(room, this);
-        debug(`${this.id} joined room: ${room}`);
-        return this;
-    }
-
-    leave(room) {
-        this.rooms.delete(room);
-        this.server._leaveRoom(room, this);
-        debug(`${this.id} left room: ${room}`);
-        return this;
-    }
-
-
-    to(room) {
-        return {
-            emit: (event, data) => {
-                this.server._emitToRoom(room, event, data, this);
-            }
-        };
-    }
-
-    get broadcast() {
-        return {
-            emit: (event, data) => {
-                this.server._broadcast(event, data, this);
-            }
-        };
-    }
-
-    close(code, reason) {
-        this.ws.close(code, reason);
-    }
-}
-
-
-class EmitServer {
-
-    constructor(options = {}) {
-        // Allow passing just a port number
-        if (typeof options === 'number') {
-            options = { port: options };
-        }
-
-        this.wss = new WebSocketServer(options);
-        this.sockets = new Map();
+class EmitApp {
+    constructor() {
+        this.handlers = new Map();
         this.rooms = new Map();
-        this._listeners = new Map();
-
-        this._setupHandlers();
-        debug(`server started on port ${options.port || 'attached'}`);
+        this.sockets = new Set();
+        this.middleware = [];
     }
 
-    _setupHandlers() {
-        this.wss.on('connection', (ws, req) => {
-            const socket = new EmitSocket(ws, this);
-            this.sockets.set(socket.id, socket);
-
-            this._emitLocal('connection', socket, req);
-        });
-
-        this.wss.on('error', (err) => {
-            debug('server error:', err.message);
-            this._emitLocal('error', err);
-        });
-    }
-
-    _emitLocal(event, ...args) {
-        const listeners = this._listeners.get(event);
-        if (listeners) {
-            listeners.forEach(fn => fn(...args));
+    plugin(plugins) {
+        if (Array.isArray(plugins)) {
+            plugins.forEach(fn => fn(this));
+        } else {
+            plugins(this);
         }
+        return this;
     }
 
-    _removeSocket(socket) {
-        this.sockets.delete(socket.id);
+    use(fn) {
+        this.middleware.push(fn);
+        return this;
     }
+
+    on(event, ...args) {
+        const handler = args.pop();
+        const middleware = args.flat();
+        this.handlers.set(event, { handler, middleware });
+        return this;
+    }
+
+    ns(prefix) {
+        return new EmitNamespace(this, prefix);
+    }
+
+    broadcast(event, options = {}) {
+        const { data = {}, to } = options;
+
+        let targets;
+        if (to && to.startsWith('#')) {
+            targets = this.rooms.get(to) || new Set();
+        } else {
+            targets = this.sockets;
+        }
+
+        targets.forEach(socket => socket.emit(event, data));
+        return this;
+    }
+
     _joinRoom(room, socket) {
         if (!this.rooms.has(room)) {
             this.rooms.set(room, new Set());
@@ -211,87 +60,223 @@ class EmitServer {
     }
 
     _leaveRoom(room, socket) {
-        const roomSockets = this.rooms.get(room);
-        if (roomSockets) {
-            roomSockets.delete(socket);
-            if (roomSockets.size === 0) {
+        const sockets = this.rooms.get(room);
+        if (sockets) {
+            sockets.delete(socket);
+            if (sockets.size === 0) {
                 this.rooms.delete(room);
             }
         }
     }
 
-    _emitToRoom(room, event, data, excludeSocket = null) {
-        const roomSockets = this.rooms.get(room);
-        if (roomSockets) {
-            roomSockets.forEach(socket => {
-                if (socket !== excludeSocket) {
-                    socket.emit(event, data);
-                }
-            });
-        }
+    _leaveAllRooms(socket) {
+        socket.rooms.forEach(room => this._leaveRoom(room, socket));
     }
 
-    _broadcast(event, data, excludeSocket = null) {
-        this.sockets.forEach(socket => {
-            if (socket !== excludeSocket) {
-                socket.emit(event, data);
+    listen(port, callback) {
+        this.wss = new WebSocketServer({ port });
+
+        this.wss.on('connection', (ws) => {
+            const socket = new EmitSocket(ws, this);
+            this.sockets.add(socket);
+
+            const entry = this.handlers.get('@connection');
+            if (entry) {
+                entry.handler({ socket, app: this });
             }
         });
-    }
-    on(event, callback) {
-        if (!this._listeners.has(event)) {
-            this._listeners.set(event, []);
-        }
-        this._listeners.get(event).push(callback);
-        return this;
-    }
-    off(event, callback) {
-        const listeners = this._listeners.get(event);
-        if (listeners) {
-            const index = listeners.indexOf(callback);
-            if (index > -1) {
-                listeners.splice(index, 1);
-            }
-        }
-        return this;
-    }
-    emit(event, data) {
-        this.sockets.forEach(socket => {
-            socket.emit(event, data);
-        });
+
+        callback?.();
         return this;
     }
 
-    to(room) {
-        return {
-            emit: (event, data) => {
-                this._emitToRoom(room, event, data);
-            }
-        };
-    }
-
-    getSocket(id) {
-        return this.sockets.get(id);
-    }
-
-    getRoom(room) {
-        return this.rooms.get(room) || new Set();
-    }
-
-
-    get size() {
-        return this.sockets.size;
-    }
-
-    close(callback) {
+    close() {
         return new Promise((resolve) => {
             this.wss.close(() => {
-                debug('server closed');
-                callback?.();
                 resolve();
             });
         });
     }
 }
 
-module.exports = { EmitServer, EmitSocket };
+class EmitNamespace {
+    constructor(app, prefix) {
+        this.app = app;
+        this.prefix = prefix;
+    }
+
+    on(event, ...args) {
+        const handler = args.pop();
+        const middleware = args.flat();
+        this.app.handlers.set(this.prefix + event, { handler, middleware });
+        return this;
+    }
+
+    ns(prefix) {
+        return new EmitNamespace(this.app, this.prefix + prefix);
+    }
+}
+
+class EmitSocket {
+    constructor(ws, app) {
+        this.ws = ws;
+        this.app = app;
+        this.id = Math.random().toString(36).slice(2, 10);
+        this.pendingRequests = new Map();
+        this.rooms = new Set();
+        this.data = {};
+
+        ws.on('message', (raw) => {
+            const message = JSON.parse(raw.toString());
+            this._handleMessage(message);
+        });
+
+        ws.on('close', () => {
+            this.app._leaveAllRooms(this);
+            this.app.sockets.delete(this);
+
+            const entry = this.app.handlers.get('@disconnect');
+            if (entry) {
+                entry.handler({ socket: this, app: this.app });
+            }
+        });
+    }
+
+    join(room) {
+        if (!room.startsWith('#')) room = '#' + room;
+        this.rooms.add(room);
+        this.app._joinRoom(room, this);
+        return this;
+    }
+
+    leave(room) {
+        if (!room.startsWith('#')) room = '#' + room;
+        this.rooms.delete(room);
+        this.app._leaveRoom(room, this);
+        return this;
+    }
+
+    _runMiddleware(middleware, req, done) {
+        let index = 0;
+
+        const next = () => {
+            if (index < middleware.length) {
+                const fn = middleware[index++];
+                fn(req, next);
+            } else {
+                done();
+            }
+        };
+
+        next();
+    }
+
+    _handleMessage(message) {
+        if (message.type === 'ack') {
+            const pending = this.pendingRequests.get(message.ackId);
+            if (pending) {
+                pending.resolve(message.data);
+                this.pendingRequests.delete(message.ackId);
+            }
+            return;
+        }
+
+        const { event, data, ackId } = message;
+
+        const socket = this;
+        const app = this.app;
+
+        // Track if reply was called
+        let replyCalled = false;
+
+        const req = {
+            event,
+            data: data || {},
+            socket: this,
+            app: this.app,
+
+            reply: ackId
+                ? (res) => this.ws.send(JSON.stringify({ type: 'ack', ackId, data: res }))
+                : () => { },
+
+            broadcast(event, options = {}) {
+                const { data = {}, to, includeSelf = false } = options;
+
+                let targets;
+                if (to && to.startsWith('#')) {
+                    targets = app.rooms.get(to) || new Set();
+                } else {
+                    targets = app.sockets;
+                }
+
+                targets.forEach(s => {
+                    if (includeSelf || s !== socket) {
+                        s.emit(event, data);
+                    }
+                });
+            }
+        };
+
+        // Wrap reply to track if it was called
+        if (ackId) {
+            const originalReply = req.reply;
+            req.reply = (data) => {
+                replyCalled = true;
+                originalReply(data);
+            };
+        }
+
+        // Run global middleware first, then route middleware, then handler
+        this._runMiddleware(this.app.middleware, req, () => {
+            try {
+                const anyEntry = this.app.handlers.get('@any');
+                if (anyEntry) {
+                    anyEntry.handler(req);
+                }
+
+                const entry = this.app.handlers.get(event);
+                if (entry) {
+                    // Run route-specific middleware, then handler
+                    this._runMiddleware(entry.middleware || [], req, () => {
+                        entry.handler(req);
+
+                        // Warn if handler didn't reply to a request
+                        if (ackId && !replyCalled) {
+                            console.warn(`Warning: Handler for '${event}' did not call reply()`);
+                        }
+                    });
+                } else {
+                    // No handler found
+                    if (ackId) {
+                        // Client expects a reply, send error
+                        req.reply({ error: `No handler for: ${event}` });
+                    } else if (!anyEntry) {
+                        console.log('No handler for:', event);
+                    }
+                }
+            } catch (err) {
+                const errorEntry = this.app.handlers.get('@error');
+                if (errorEntry) {
+                    errorEntry.handler(err, req);
+                } else {
+                    console.error('Unhandled error:', err);
+                }
+            }
+        });
+    }
+
+    emit(event, data) {
+        this.ws.send(JSON.stringify({ event, data }));
+        return this;
+    }
+
+    request(event, data) {
+        return new Promise((resolve) => {
+            const ackId = Math.random().toString(36).slice(2, 10);
+            this.pendingRequests.set(ackId, { resolve });
+            this.ws.send(JSON.stringify({ event, data, ackId }));
+        });
+    }
+}
+
+module.exports = { EmitApp, EmitSocket, EmitNamespace };

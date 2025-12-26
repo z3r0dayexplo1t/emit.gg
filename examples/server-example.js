@@ -1,149 +1,69 @@
 /**
- * emit.gg - Server Example (Express-like API)
- * Run with: node examples/server-example.js
- * Debug:    DEBUG=emit.gg node examples/server-example.js
+ * emit.gg - Server Example
  */
 
-const emit = require('../src');
+const { EmitApp } = require('../src');
+const heartbeat = require('../src/plugins/heartbeat');
 
-// Create app (just like Express!)
-const app = emit();
+const app = new EmitApp();
 
-// ─── Middleware ────────────────────────────────────────
+// Add plugins
+app.plugin(heartbeat({ interval: 30000 }));
 
-app.use((socket, next) => {
-    console.log(`[+] Connected: ${socket.id}`);
-    socket.connectedAt = Date.now();
+// Middleware: Logging
+app.use((req, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.socket.id} -> ${req.event}`);
     next();
 });
 
-app.use((socket, next) => {
-    // Access query params from URL: ws://localhost:3000?token=abc
-    socket.user = { id: socket.id, token: socket.query?.token };
-    next();
+// System events
+app.on('@connection', (req) => {
+    console.log('Connected:', req.socket.id);
 });
 
-app.use((socket, next) => {
-    socket.emit('welcome', {
-        message: 'Welcome to emit.gg!',
-        yourId: socket.id
+app.on('@disconnect', (req) => {
+    console.log('Disconnected:', req.socket.id);
+});
+
+app.on('@ping', (req) => {
+    console.log('Heartbeat:', req.socket.id);
+});
+
+app.on('@error', (err, req) => {
+    console.error('Error:', err.message);
+});
+
+// User events
+app.on('/ping', (req) => {
+    req.reply({ pong: true, time: Date.now() });
+});
+
+app.on('/join', (req) => {
+    req.socket.join('#' + req.data.room);
+    req.broadcast('user-joined', {
+        data: { id: req.socket.id },
+        to: '#' + req.data.room
     });
-    next();
+    req.reply({ joined: req.data.room });
 });
 
-app.use((socket, next) => {
-    socket.on('disconnect', () => {
-        const duration = Date.now() - socket.connectedAt;
-        console.log(`[-] Disconnected: ${socket.id} (${duration}ms)`);
-    });
-    next();
-});
-
-// ─── Global Events ─────────────────────────────────────
-
-app.on('ping', (socket, _, ack) => {
-    if (ack) ack({ pong: Date.now() });
-});
-
-app.on('chat', (socket, data, ack) => {
-    console.log(`[${socket.id}] ${data.message}`);
-    if (ack) ack({ delivered: true, timestamp: Date.now() });
-    socket.broadcast.emit('chat', {
-        from: socket.id,
-        message: data.message
-    });
-});
-
-// ─── Room Namespace ────────────────────────────────────
-
-const room = app.namespace('room');
-
-room.on('join', (socket, data, ack) => {
-    socket.join(data.room);
-    console.log(`[${socket.id}] Joined room: ${data.room}`);
-    if (ack) ack({ joined: data.room });
-    socket.to(data.room).emit('room:user:joined', { userId: socket.id });
-});
-
-room.on('leave', (socket, data, ack) => {
-    socket.leave(data.room);
-    console.log(`[${socket.id}] Left room: ${data.room}`);
-    if (ack) ack({ left: data.room });
-    socket.to(data.room).emit('room:user:left', { userId: socket.id });
-});
-
-room.on('message', (socket, data) => {
-    socket.to(data.room).emit('room:message', {
-        from: socket.id,
-        room: data.room,
-        message: data.message
+app.on('/message', (req) => {
+    req.broadcast('message', {
+        data: { from: req.socket.id, text: req.data.text },
+        to: '#' + req.data.room,
+        includeSelf: true
     });
 });
 
-// ─── User Namespace ────────────────────────────────────
-
-const user = app.namespace('user');
-
-user.on('profile', (socket, _, ack) => {
-    if (ack) ack({ user: socket.user, connectedAt: socket.connectedAt });
-});
-
-user.on('update', async (socket, data, ack) => {
-    console.log(`[${socket.id}] Updating profile:`, data);
-    // Simulate async operation
-    await new Promise(r => setTimeout(r, 100));
-    socket.user = { ...socket.user, ...data };
-    if (ack) ack({ success: true, user: socket.user });
-});
-
-// ─── Admin Namespace (nested) ──────────────────────────
-
-const admin = app.namespace('admin');
-
-admin.on('stats', (socket, _, ack) => {
-    if (ack) ack({
-        connections: app.sockets.size,
-        uptime: process.uptime()
+app.on('/leave', (req) => {
+    req.broadcast('user-left', {
+        data: { id: req.socket.id },
+        to: '#' + req.data.room
     });
+    req.socket.leave('#' + req.data.room);
+    req.reply({ left: req.data.room });
 });
-
-const adminUsers = admin.namespace('users');
-
-adminUsers.on('list', (socket, data, ack) => {
-    const users = Array.from(app.sockets).map(s => ({
-        id: s.id,
-        rooms: Array.from(s.rooms)
-    }));
-    if (ack) ack({ users, page: data?.page || 1 });
-});
-
-adminUsers.on('kick', (socket, data, ack) => {
-    const target = app.server?.getSocket(data.userId);
-    if (target) {
-        target.emit('kicked', { reason: data.reason });
-        target.close();
-        if (ack) ack({ kicked: true });
-    } else {
-        if (ack) ack({ kicked: false, error: 'User not found' });
-    }
-});
-
-// ─── Start Server ──────────────────────────────────────
 
 app.listen(3000, () => {
-    console.log('🚀 emit.gg server running on ws://localhost:3000');
-    console.log('\nNamespaces:');
-    console.log('  room:*        - room:join, room:leave, room:message');
-    console.log('  user:*        - user:profile, user:update');
-    console.log('  admin:*       - admin:stats');
-    console.log('  admin:users:* - admin:users:list, admin:users:kick');
-    console.log('');
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('\nShutting down...');
-    await app.close();
-    console.log('Server closed');
-    process.exit(0);
+    console.log('Server running on ws://localhost:3000');
 });
