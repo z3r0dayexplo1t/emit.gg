@@ -194,6 +194,12 @@ class EmitSocket {
             data: data || {},
             socket: this,
             app: this.app,
+            id: this.id,
+
+            // Shortcut to emit to this socket
+            emit: (event, data) => {
+                socket.emit(event, data);
+            },
 
             // Shortcut to set/get socket data
             set: (key, value) => {

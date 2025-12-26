@@ -1,6 +1,6 @@
 # emit.gg
 
-A clean, Express-like WebSocket framework for Node.js.
+A clean, minimal WebSocket framework with middleware and rooms.
 
 ```javascript
 const { EmitApp } = require('emit.gg');
@@ -40,7 +40,7 @@ const { EmitApp } = require('emit.gg');
 const app = new EmitApp();
 
 app.on('@connection', (req) => {
-    console.log('Connected:', req.socket.id);
+    console.log('Connected:', req.id);
 });
 
 app.on('/ping', (req) => {
@@ -104,16 +104,18 @@ Every handler receives a `req` object:
 
 ```javascript
 app.on('/message', (req) => {
-    req.event      // Event name: '/message'
-    req.data       // Data sent by client
-    req.socket     // The socket that sent this
-    req.app        // The EmitApp instance
+    req.event                    // Event name: '/message'
+    req.data                     // Data sent by client
+    req.id                       // Socket ID (shortcut)
+    req.socket                   // The socket that sent this
+    req.app                      // The EmitApp instance
     
+    req.emit(event, data)        // Emit event to this socket
     req.set(key, value)          // Store data on socket
     req.get(key)                 // Get stored data
     req.join('#room')            // Join a room
     req.leave('#room')           // Leave a room
-    req.reply(data)              // Reply to client
+    req.reply(data)              // Reply to request
     req.broadcast(event, opts)   // Broadcast to others
 });
 ```
@@ -176,7 +178,7 @@ Runs for all events:
 
 ```javascript
 app.use((req, next) => {
-    console.log(`${req.socket.id} -> ${req.event}`);
+    console.log(`${req.id} -> ${req.event}`);
     next();
 });
 ```
@@ -213,7 +215,7 @@ app.on('/join', (req) => {
     
     // Notify others in room
     req.broadcast('user-joined', {
-        data: { id: req.socket.id },
+        data: { id: req.id },
         to: '#' + req.data.room
     });
     
@@ -309,7 +311,7 @@ const heartbeat = require('emit.gg/src/plugins/heartbeat');
 app.plugin(heartbeat({ interval: 30000 }));
 
 app.on('@ping', (req) => {
-    console.log('Heartbeat:', req.socket.id);
+    console.log('Heartbeat:', req.id);
 });
 ```
 
@@ -334,7 +336,7 @@ const app = new EmitApp();
 app.plugin(heartbeat({ interval: 30000 }));
 
 app.on('@connection', (req) => {
-    console.log('Connected:', req.socket.id);
+    console.log('Connected:', req.id);
 });
 
 app.on('/join', (req) => {

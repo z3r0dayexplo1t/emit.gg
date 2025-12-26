@@ -1,14 +1,23 @@
 {
     "name": "emit.gg",
-    "version": "1.0.0",
-    "description": "A lean, unopinionated WebSocket wrapper. Simple event-based messaging without the bloat.",
+    "version": "1.0.1",
+    "description": "A clean, minimal WebSocket framework with middleware and rooms",
     "main": "src/index.js",
     "browser": "src/client.js",
     "exports": {
         ".": "./src/index.js",
         "./server": "./src/server.js",
-        "./client": "./src/client.js"
+        "./client": "./src/client.js",
+        "./plugins/heartbeat": "./src/plugins/heartbeat.js"
     },
+    "files": [
+        "src/index.js",
+        "src/server.js",
+        "src/client.js",
+        "src/plugins/",
+        "README.md",
+        "LICENSE"
+    ],
     "scripts": {
         "test": "node test/test.js",
         "example": "node examples/server-example.js"
@@ -21,23 +30,24 @@
         "socket",
         "emit",
         "lightweight",
-        "lean"
+        "rooms",
+        "middleware",
+        "plugins"
     ],
-    "author": "",
+    "author": "Sam van Oosterhout",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/yourusername/emit.gg"
+        "url": "https://github.com/z3r0dayexplo1t/emit.gg"
     },
     "bugs": {
-        "url": "https://github.com/yourusername/emit.gg/issues"
+        "url": "https://github.com/z3r0dayexplo1t/emit.gg/issues"
     },
-    "homepage": "https://github.com/yourusername/emit.gg#readme",
+    "homepage": "https://github.com/z3r0dayexplo1t/emit.gg#readme",
     "engines": {
         "node": ">=14.0.0"
     },
     "dependencies": {
         "ws": "^8.14.2"
-    },
-    "devDependencies": {}
+    }
 }
