@@ -1,6 +1,6 @@
 {
     "name": "emit.gg",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "A clean, minimal WebSocket framework with middleware and rooms",
     "main": "src/index.js",
     "browser": "src/client.js",
