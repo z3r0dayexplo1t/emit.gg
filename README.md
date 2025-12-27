@@ -322,6 +322,139 @@ app.on('@ping', (req) => {
 | `@` | System event | `@connection`, `@disconnect` |
 | `/` | User event | `/ping`, `/message` |
 | `#` | Room | `#general`, `#game-123` |
+| `*` | Tag | `*admin`, `*premium` |
+
+## Scaling
+
+### Redis Adapter
+
+For horizontal scaling across multiple servers, use the Redis adapter:
+
+```javascript
+const Redis = require('ioredis');
+const { EmitApp } = require('emit.gg');
+const redisAdapter = require('emit.gg/plugins/redis');
+
+// Create Redis clients
+const redis = new Redis();  // For data storage
+const pub = new Redis();    // For publishing
+const sub = new Redis();    // For subscribing
+
+const app = new EmitApp();
+app.plugin(redisAdapter({ redis, pub, sub }));
+
+app.listen(3000);
+```
+
+### Features
+
+#### Cross-Server Broadcasts
+
+```javascript
+// Broadcasts reach all connected servers
+app.broadcast('announcement', { 
+    data: { text: 'Hello everyone!' },
+    to: '#general'
+});
+
+// Local-only broadcast (just this server)
+app.broadcast('local', { data: {}, local: true });
+```
+
+#### Direct Messaging
+
+```javascript
+// Send to specific socket (even on another server)
+app.emitTo(socketId, 'notification', { text: 'Hello' });
+```
+
+#### Room Sync
+
+```javascript
+// Get room size across all servers
+const count = await app.getRoomSize('#lobby');
+
+// Get all socket IDs in room
+const members = await app.getRoomMembers('#lobby');
+```
+
+#### Socket Presence
+
+```javascript
+// Total sockets across all servers
+const total = await app.getTotalSockets();
+
+// Check if socket exists
+const exists = await app.socketExists(socketId);
+
+// Get all socket IDs
+const ids = await app.getAllSocketIds();
+```
+
+#### User Presence
+
+```javascript
+// Track user online status
+await app.setUserOnline('user123', socketId);
+await app.setUserOffline('user123');
+
+// Check if user is online
+const online = await app.isUserOnline('user123');
+
+// Get user's socket ID
+const socketId = await app.getUserSocketId('user123');
+
+// Send message to user directly
+await app.emitToUser('user123', 'notification', { text: 'Hello' });
+
+// Get online stats
+const count = await app.getOnlineUserCount();
+const users = await app.getOnlineUsers();
+```
+
+#### Tags Sync
+
+```javascript
+// Sync tags to Redis
+await app.syncTag(socketId, '*admin');
+await app.unsyncTag(socketId, '*admin');
+
+// Query tags across servers
+const admins = await app.getTaggedSockets('*admin');
+const count = await app.getTagCount('*admin');
+```
+
+### Load Balancer Setup
+
+WebSockets require **sticky sessions**. Configure your load balancer:
+
+#### Nginx
+
+```nginx
+upstream websocket {
+    ip_hash;  # Sticky sessions
+    server server1:3000;
+    server server2:3000;
+}
+
+server {
+    location / {
+        proxy_pass http://websocket;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+#### HAProxy
+
+```haproxy
+backend websocket
+    balance source
+    server server1 127.0.0.1:3001
+    server server2 127.0.0.1:3002
+```
 
 ## Examples
 
@@ -330,7 +463,7 @@ app.on('@ping', (req) => {
 ```javascript
 // Server
 const { EmitApp } = require('emit.gg');
-const heartbeat = require('emit.gg/src/plugins/heartbeat');
+const heartbeat = require('emit.gg/plugins/heartbeat');
 
 const app = new EmitApp();
 app.plugin(heartbeat({ interval: 30000 }));
@@ -384,6 +517,51 @@ const { EmitClient } = require('emit.gg');
 })();
 ```
 
+### Scaled Chat with Redis
+
+```javascript
+const Redis = require('ioredis');
+const { EmitApp } = require('emit.gg');
+const heartbeat = require('emit.gg/plugins/heartbeat');
+const redisAdapter = require('emit.gg/plugins/redis');
+
+const redis = new Redis();
+const pub = new Redis();
+const sub = new Redis();
+
+const app = new EmitApp();
+app.plugin(heartbeat({ interval: 30000 }));
+app.plugin(redisAdapter({ redis, pub, sub }));
+
+app.on('@connection', async (req) => {
+    const userId = req.info.query.userId;
+    if (userId) {
+        req.set('userId', userId);
+        await app.setUserOnline(userId, req.id);
+    }
+    
+    const total = await app.getTotalSockets();
+    console.log(`Connected: ${req.id} (${total} total)`);
+});
+
+app.on('@disconnect', async (req) => {
+    const userId = req.get('userId');
+    if (userId) {
+        await app.setUserOffline(userId);
+    }
+});
+
+app.on('/dm', async (req) => {
+    await app.emitToUser(req.data.to, 'dm', {
+        from: req.get('userId'),
+        text: req.data.text
+    });
+});
+
+app.listen(3000);
+```
+
 ## License
 
 MIT
+

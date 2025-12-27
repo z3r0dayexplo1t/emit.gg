@@ -8,7 +8,8 @@
         ".": "./src/index.js",
         "./server": "./src/server.js",
         "./client": "./src/client.js",
-        "./plugins/heartbeat": "./src/plugins/heartbeat.js"
+        "./plugins/heartbeat": "./src/plugins/heartbeat.js",
+        "./plugins/redis": "./src/plugins/redis.js"
     },
     "files": [
         "src/index.js",
@@ -32,7 +33,9 @@
         "lightweight",
         "rooms",
         "middleware",
-        "plugins"
+        "plugins",
+        "redis",
+        "scaling"
     ],
     "author": "Sam van Oosterhout",
     "license": "MIT",

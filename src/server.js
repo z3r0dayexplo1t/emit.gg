@@ -4,6 +4,8 @@
  */
 
 const { WebSocketServer } = require('ws');
+const crypto = require('crypto');
+const url = require('url');
 
 class EmitApp {
     constructor() {
@@ -11,6 +13,36 @@ class EmitApp {
         this.rooms = new Map();
         this.sockets = new Set();
         this.middleware = [];
+    }
+
+    _extractConnectionInfo(req) {
+        const parsed = url.parse(req.url || '', true);
+        return {
+            headers: req.headers,
+            query: parsed.query,
+            path: parsed.pathname,
+            ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+                || req.socket?.remoteAddress
+                || null,
+            origin: req.headers.origin || null,
+            secure: req.socket?.encrypted || false
+        };
+    }
+
+    _handleConnection(ws, req, app) {
+        const socket = new EmitSocket(ws, app);
+        const info = app._extractConnectionInfo(req);
+
+        // Store connection info on socket
+        socket.info = info;
+        socket.request = req;
+
+        app.sockets.add(socket);
+
+        const entry = app.handlers.get('@connection');
+        if (entry) {
+            entry.handler({ socket, app, req, info });
+        }
     }
 
     plugin(plugins) {
@@ -43,7 +75,14 @@ class EmitApp {
 
         let targets;
         if (to && to.startsWith('#')) {
+            // Room targeting
             targets = this.rooms.get(to) || new Set();
+        } else if (to && to.startsWith('*')) {
+            // Tag targeting - filter sockets by tag
+            targets = new Set();
+            this.sockets.forEach(socket => {
+                if (socket.hasTag(to)) targets.add(socket);
+            });
         } else {
             targets = this.sockets;
         }
@@ -73,20 +112,41 @@ class EmitApp {
         socket.rooms.forEach(room => this._leaveRoom(room, socket));
     }
 
-    listen(port, callback) {
-        this.wss = new WebSocketServer({ port });
+    listen(port, options = {}, callback) {
+        // Support both listen(port, callback) and listen(port, options, callback)
+        if (typeof options === 'function') {
+            callback = options;
+            options = {};
+        }
 
-        this.wss.on('connection', (ws) => {
-            const socket = new EmitSocket(ws, this);
-            this.sockets.add(socket);
+        const wssOptions = {
+            port,
+            maxPayload: options.maxPayload || 1024 * 1024
+        };
 
-            const entry = this.handlers.get('@connection');
-            if (entry) {
-                entry.handler({ socket, app: this });
-            }
-        });
+        this.wss = new WebSocketServer(wssOptions);
+        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req, this));
 
         callback?.();
+        return this;
+    }
+
+    attach(server, options = {}) {
+        const wssOptions = {
+            server,
+            maxPayload: options.maxPayload || 1024 * 1024
+        };
+
+        // Pass through any additional ws options
+        if (options.path) wssOptions.path = options.path;
+        if (options.verifyClient) wssOptions.verifyClient = options.verifyClient;
+        if (options.perMessageDeflate !== undefined) {
+            wssOptions.perMessageDeflate = options.perMessageDeflate;
+        }
+
+        this.wss = new WebSocketServer(wssOptions);
+        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req, this));
+
         return this;
     }
 
@@ -121,14 +181,26 @@ class EmitSocket {
     constructor(ws, app) {
         this.ws = ws;
         this.app = app;
-        this.id = Math.random().toString(36).slice(2, 10);
+        this.id = crypto.randomUUID();
         this.pendingRequests = new Map();
         this.rooms = new Set();
+        this.tags = new Set();
         this.data = {};
+        this.info = null;    // Set by _handleConnection
+        this.request = null; // Set by _handleConnection
 
         ws.on('message', (raw) => {
-            const message = JSON.parse(raw.toString());
-            this._handleMessage(message);
+            try {
+                const message = JSON.parse(raw.toString());
+                this._handleMessage(message);
+            } catch (err) {
+                const errorEntry = this.app.handlers.get('@error');
+                if (errorEntry) {
+                    errorEntry.handler(err, { socket: this, app: this.app, event: null, data: null });
+                } else {
+                    console.error('Failed to parse message:', err.message);
+                }
+            }
         });
 
         ws.on('close', () => {
@@ -156,6 +228,23 @@ class EmitSocket {
         return this;
     }
 
+    tag(name) {
+        if (!name.startsWith('*')) name = '*' + name;
+        this.tags.add(name);
+        return this;
+    }
+
+    untag(name) {
+        if (!name.startsWith('*')) name = '*' + name;
+        this.tags.delete(name);
+        return this;
+    }
+
+    hasTag(name) {
+        if (!name.startsWith('*')) name = '*' + name;
+        return this.tags.has(name);
+    }
+
     _runMiddleware(middleware, req, done) {
         let index = 0;
 
@@ -175,6 +264,7 @@ class EmitSocket {
         if (message.type === 'ack') {
             const pending = this.pendingRequests.get(message.ackId);
             if (pending) {
+                if (pending.timer) clearTimeout(pending.timer);
                 pending.resolve(message.data);
                 this.pendingRequests.delete(message.ackId);
             }
@@ -217,6 +307,17 @@ class EmitSocket {
                 socket.leave(room);
             },
 
+            // Shortcut for tag management
+            tag: (name) => {
+                socket.tag(name);
+            },
+            untag: (name) => {
+                socket.untag(name);
+            },
+            hasTag: (name) => {
+                return socket.hasTag(name);
+            },
+
             reply: ackId
                 ? (res) => this.ws.send(JSON.stringify({ type: 'ack', ackId, data: res }))
                 : () => { },
@@ -226,7 +327,14 @@ class EmitSocket {
 
                 let targets;
                 if (to && to.startsWith('#')) {
+                    // Room targeting
                     targets = app.rooms.get(to) || new Set();
+                } else if (to && to.startsWith('*')) {
+                    // Tag targeting
+                    targets = new Set();
+                    app.sockets.forEach(s => {
+                        if (s.hasTag(to)) targets.add(s);
+                    });
                 } else {
                     targets = app.sockets;
                 }
@@ -248,24 +356,42 @@ class EmitSocket {
             };
         }
 
+        const handleError = (err) => {
+            const errorEntry = this.app.handlers.get('@error');
+            if (errorEntry) {
+                errorEntry.handler(err, req);
+            } else {
+                console.error('Unhandled error:', err);
+            }
+        };
+
+        const safeCall = (fn) => {
+            try {
+                const result = fn();
+                if (result && typeof result.catch === 'function') {
+                    result.catch(handleError);
+                }
+            } catch (err) {
+                handleError(err);
+            }
+        };
+
         // Run global middleware first, then route middleware, then handler
         this._runMiddleware(this.app.middleware, req, () => {
-            try {
+            safeCall(() => {
                 const anyEntry = this.app.handlers.get('@any');
                 if (anyEntry) {
-                    anyEntry.handler(req);
+                    const result = anyEntry.handler(req);
+                    if (result && typeof result.catch === 'function') {
+                        result.catch(handleError);
+                    }
                 }
 
                 const entry = this.app.handlers.get(event);
                 if (entry) {
                     // Run route-specific middleware, then handler
                     this._runMiddleware(entry.middleware || [], req, () => {
-                        entry.handler(req);
-
-                        // Warn if handler didn't reply to a request
-                        if (ackId && !replyCalled) {
-                            console.warn(`Warning: Handler for '${event}' did not call reply()`);
-                        }
+                        safeCall(() => entry.handler(req));
                     });
                 } else {
                     // No handler found
@@ -276,14 +402,7 @@ class EmitSocket {
                         console.log('No handler for:', event);
                     }
                 }
-            } catch (err) {
-                const errorEntry = this.app.handlers.get('@error');
-                if (errorEntry) {
-                    errorEntry.handler(err, req);
-                } else {
-                    console.error('Unhandled error:', err);
-                }
-            }
+            });
         });
     }
 
@@ -292,10 +411,17 @@ class EmitSocket {
         return this;
     }
 
-    request(event, data) {
-        return new Promise((resolve) => {
-            const ackId = Math.random().toString(36).slice(2, 10);
-            this.pendingRequests.set(ackId, { resolve });
+    request(event, data, options = {}) {
+        return new Promise((resolve, reject) => {
+            const timeout = options.timeout || 10000;
+            const ackId = crypto.randomUUID();
+
+            const timer = setTimeout(() => {
+                this.pendingRequests.delete(ackId);
+                reject(new Error(`Request timeout: ${event}`));
+            }, timeout);
+
+            this.pendingRequests.set(ackId, { resolve, timer });
             this.ws.send(JSON.stringify({ event, data, ackId }));
         });
     }
