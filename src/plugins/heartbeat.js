@@ -19,9 +19,9 @@ module.exports = ({ interval = 30000 } = {}) => {
                 isAlive = false;
                 socket.ws.ping();
 
-                const pingHandler = app.handlers.get('@ping');
-                if (pingHandler) {
-                    pingHandler({ socket, app });
+                const pingEntry = app.handlers.get('@ping');
+                if (pingEntry) {
+                    pingEntry.handler({ socket, app });
                 }
             }, interval);
 

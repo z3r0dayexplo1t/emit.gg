@@ -4,6 +4,7 @@
  */
 
 const { WebSocketServer } = require('ws');
+const crypto = require('crypto');
 
 class EmitApp {
     constructor() {
@@ -73,8 +74,15 @@ class EmitApp {
         socket.rooms.forEach(room => this._leaveRoom(room, socket));
     }
 
-    listen(port, callback) {
-        this.wss = new WebSocketServer({ port });
+    listen(port, options = {}, callback) {
+        // Support both listen(port, callback) and listen(port, options, callback)
+        if (typeof options === 'function') {
+            callback = options;
+            options = {};
+        }
+
+        const maxPayload = options.maxPayload || 1024 * 1024; // 1MB default
+        this.wss = new WebSocketServer({ port, maxPayload });
 
         this.wss.on('connection', (ws) => {
             const socket = new EmitSocket(ws, this);
@@ -121,14 +129,23 @@ class EmitSocket {
     constructor(ws, app) {
         this.ws = ws;
         this.app = app;
-        this.id = Math.random().toString(36).slice(2, 10);
+        this.id = crypto.randomUUID();
         this.pendingRequests = new Map();
         this.rooms = new Set();
         this.data = {};
 
         ws.on('message', (raw) => {
-            const message = JSON.parse(raw.toString());
-            this._handleMessage(message);
+            try {
+                const message = JSON.parse(raw.toString());
+                this._handleMessage(message);
+            } catch (err) {
+                const errorEntry = this.app.handlers.get('@error');
+                if (errorEntry) {
+                    errorEntry.handler(err, { socket: this, app: this.app, event: null, data: null });
+                } else {
+                    console.error('Failed to parse message:', err.message);
+                }
+            }
         });
 
         ws.on('close', () => {
@@ -175,6 +192,7 @@ class EmitSocket {
         if (message.type === 'ack') {
             const pending = this.pendingRequests.get(message.ackId);
             if (pending) {
+                if (pending.timer) clearTimeout(pending.timer);
                 pending.resolve(message.data);
                 this.pendingRequests.delete(message.ackId);
             }
@@ -248,24 +266,42 @@ class EmitSocket {
             };
         }
 
+        const handleError = (err) => {
+            const errorEntry = this.app.handlers.get('@error');
+            if (errorEntry) {
+                errorEntry.handler(err, req);
+            } else {
+                console.error('Unhandled error:', err);
+            }
+        };
+
+        const safeCall = (fn) => {
+            try {
+                const result = fn();
+                if (result && typeof result.catch === 'function') {
+                    result.catch(handleError);
+                }
+            } catch (err) {
+                handleError(err);
+            }
+        };
+
         // Run global middleware first, then route middleware, then handler
         this._runMiddleware(this.app.middleware, req, () => {
-            try {
+            safeCall(() => {
                 const anyEntry = this.app.handlers.get('@any');
                 if (anyEntry) {
-                    anyEntry.handler(req);
+                    const result = anyEntry.handler(req);
+                    if (result && typeof result.catch === 'function') {
+                        result.catch(handleError);
+                    }
                 }
 
                 const entry = this.app.handlers.get(event);
                 if (entry) {
                     // Run route-specific middleware, then handler
                     this._runMiddleware(entry.middleware || [], req, () => {
-                        entry.handler(req);
-
-                        // Warn if handler didn't reply to a request
-                        if (ackId && !replyCalled) {
-                            console.warn(`Warning: Handler for '${event}' did not call reply()`);
-                        }
+                        safeCall(() => entry.handler(req));
                     });
                 } else {
                     // No handler found
@@ -276,14 +312,7 @@ class EmitSocket {
                         console.log('No handler for:', event);
                     }
                 }
-            } catch (err) {
-                const errorEntry = this.app.handlers.get('@error');
-                if (errorEntry) {
-                    errorEntry.handler(err, req);
-                } else {
-                    console.error('Unhandled error:', err);
-                }
-            }
+            });
         });
     }
 
@@ -292,10 +321,17 @@ class EmitSocket {
         return this;
     }
 
-    request(event, data) {
-        return new Promise((resolve) => {
-            const ackId = Math.random().toString(36).slice(2, 10);
-            this.pendingRequests.set(ackId, { resolve });
+    request(event, data, options = {}) {
+        return new Promise((resolve, reject) => {
+            const timeout = options.timeout || 10000;
+            const ackId = crypto.randomUUID();
+
+            const timer = setTimeout(() => {
+                this.pendingRequests.delete(ackId);
+                reject(new Error(`Request timeout: ${event}`));
+            }, timeout);
+
+            this.pendingRequests.set(ackId, { resolve, timer });
             this.ws.send(JSON.stringify({ event, data, ackId }));
         });
     }

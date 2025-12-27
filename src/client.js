@@ -4,6 +4,7 @@
  */
 
 const WebSocket = require('ws');
+const crypto = require('crypto');
 
 class EmitClient {
     constructor(ws, options = {}) {
@@ -44,8 +45,12 @@ class EmitClient {
 
     _setupListeners() {
         this.ws.on('message', (raw) => {
-            const message = JSON.parse(raw.toString());
-            this._handleMessage(message);
+            try {
+                const message = JSON.parse(raw.toString());
+                this._handleMessage(message);
+            } catch (err) {
+                this._callListeners('@error', { error: `Failed to parse message: ${err.message}` });
+            }
         });
 
         this.ws.on('close', () => {
@@ -63,7 +68,8 @@ class EmitClient {
 
     _attemptReconnect() {
         const maxRetries = this.options.maxRetries || 10;
-        const delay = this.options.reconnectDelay || 1000;
+        const baseDelay = this.options.reconnectDelay || 1000;
+        const maxDelay = this.options.maxReconnectDelay || 30000;
 
         if (this.reconnectAttempts >= maxRetries) {
             this._callListeners('@error', { error: 'Max reconnect attempts reached' });
@@ -72,23 +78,24 @@ class EmitClient {
 
         this.reconnectAttempts++;
 
-        setTimeout(async () => {
-            try {
-                const ws = new WebSocket(this.options.url);
+        // Exponential backoff with jitter
+        const exponentialDelay = baseDelay * Math.pow(2, this.reconnectAttempts - 1);
+        const jitter = Math.random() * 0.3 * exponentialDelay;
+        const delay = Math.min(exponentialDelay + jitter, maxDelay);
 
-                ws.on('open', () => {
-                    this.ws = ws;
-                    this.reconnectAttempts = 0;
-                    this._setupListeners();
-                    this._callListeners('@reconnect', {});
-                });
+        setTimeout(() => {
+            const ws = new WebSocket(this.options.url);
 
-                ws.on('error', () => {
-                    this._attemptReconnect();
-                });
-            } catch (err) {
+            ws.on('open', () => {
+                this.ws = ws;
+                this.reconnectAttempts = 0;
+                this._setupListeners();
+                this._callListeners('@reconnect', {});
+            });
+
+            ws.on('error', () => {
                 this._attemptReconnect();
-            }
+            });
         }, delay);
     }
 
@@ -155,7 +162,7 @@ class EmitClient {
             }
 
             const timeout = options.timeout || 10000;
-            const ackId = Math.random().toString(36).slice(2, 10);
+            const ackId = crypto.randomUUID();
 
             const timer = setTimeout(() => {
                 this.pendingRequests.delete(ackId);
