@@ -5,6 +5,7 @@
 
 const { WebSocketServer } = require('ws');
 const crypto = require('crypto');
+const url = require('url');
 
 class EmitApp {
     constructor() {
@@ -12,6 +13,36 @@ class EmitApp {
         this.rooms = new Map();
         this.sockets = new Set();
         this.middleware = [];
+    }
+
+    _extractConnectionInfo(req) {
+        const parsed = url.parse(req.url || '', true);
+        return {
+            headers: req.headers,
+            query: parsed.query,
+            path: parsed.pathname,
+            ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+                || req.socket?.remoteAddress
+                || null,
+            origin: req.headers.origin || null,
+            secure: req.socket?.encrypted || false
+        };
+    }
+
+    _handleConnection(ws, req, app) {
+        const socket = new EmitSocket(ws, app);
+        const info = app._extractConnectionInfo(req);
+
+        // Store connection info on socket
+        socket.info = info;
+        socket.request = req;
+
+        app.sockets.add(socket);
+
+        const entry = app.handlers.get('@connection');
+        if (entry) {
+            entry.handler({ socket, app, req, info });
+        }
     }
 
     plugin(plugins) {
@@ -81,20 +112,34 @@ class EmitApp {
             options = {};
         }
 
-        const maxPayload = options.maxPayload || 1024 * 1024; // 1MB default
-        this.wss = new WebSocketServer({ port, maxPayload });
+        const wssOptions = {
+            port,
+            maxPayload: options.maxPayload || 1024 * 1024
+        };
 
-        this.wss.on('connection', (ws) => {
-            const socket = new EmitSocket(ws, this);
-            this.sockets.add(socket);
-
-            const entry = this.handlers.get('@connection');
-            if (entry) {
-                entry.handler({ socket, app: this });
-            }
-        });
+        this.wss = new WebSocketServer(wssOptions);
+        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req, this));
 
         callback?.();
+        return this;
+    }
+
+    attach(server, options = {}) {
+        const wssOptions = {
+            server,
+            maxPayload: options.maxPayload || 1024 * 1024
+        };
+
+        // Pass through any additional ws options
+        if (options.path) wssOptions.path = options.path;
+        if (options.verifyClient) wssOptions.verifyClient = options.verifyClient;
+        if (options.perMessageDeflate !== undefined) {
+            wssOptions.perMessageDeflate = options.perMessageDeflate;
+        }
+
+        this.wss = new WebSocketServer(wssOptions);
+        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req, this));
+
         return this;
     }
 
@@ -133,6 +178,8 @@ class EmitSocket {
         this.pendingRequests = new Map();
         this.rooms = new Set();
         this.data = {};
+        this.info = null;    // Set by _handleConnection
+        this.request = null; // Set by _handleConnection
 
         ws.on('message', (raw) => {
             try {
