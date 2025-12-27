@@ -1,6 +1,6 @@
 # emit.gg
 
-A clean, minimal WebSocket framework with middleware and rooms.
+A clean, minimal WebSocket framework with middleware, rooms, and horizontal scaling.
 
 ```javascript
 const { EmitApp } = require('emit.gg');
@@ -16,13 +16,15 @@ app.listen(3000);
 
 ## Features
 
-- 🚀 **Express-like API** – Familiar routing and middleware patterns
+- 🚀 **Clean API** – Intuitive routing and middleware patterns
 - 📦 **Plugin System** – Extend functionality with plugins
 - 🏠 **Rooms** – Group sockets and broadcast to channels
+- 🏷️ **Tags** – Label sockets for targeted messaging
 - 🔀 **Namespaces** – Organize events with prefixes
 - ⚡ **Request/Response** – Promise-based request-reply pattern
 - 🔄 **Auto-Reconnect** – Client reconnects automatically
 - 🔧 **Middleware** – Global and route-specific middleware
+- 📡 **Redis Adapter** – Horizontal scaling out of the box
 
 ## Installation
 
@@ -41,6 +43,8 @@ const app = new EmitApp();
 
 app.on('@connection', (req) => {
     console.log('Connected:', req.id);
+    console.log('IP:', req.info.ip);
+    console.log('Query:', req.info.query);
 });
 
 app.on('/ping', (req) => {
@@ -84,9 +88,42 @@ const app = new EmitApp();
 | `app.use(fn)` | Add global middleware |
 | `app.plugin(fn)` | Add plugin |
 | `app.ns(prefix)` | Create namespace |
-| `app.broadcast(event, options)` | Broadcast to all sockets |
-| `app.listen(port, callback)` | Start server |
+| `app.broadcast(event, options)` | Broadcast to sockets |
+| `app.listen(port, [options], callback)` | Start standalone server |
+| `app.attach(server, [options])` | Attach to existing HTTP server |
 | `app.close()` | Close server |
+
+##### Listen Options
+
+```javascript
+app.listen(3000, {
+    maxPayload: 1024 * 1024  // Max message size (default: 1MB)
+}, () => {
+    console.log('Server started');
+});
+```
+
+##### Attach to HTTP Server
+
+```javascript
+const http = require('http');
+const { EmitApp } = require('emit.gg');
+
+const server = http.createServer((req, res) => {
+    res.end('Hello');
+});
+
+const app = new EmitApp();
+app.attach(server, {
+    path: '/ws',              // WebSocket path
+    maxPayload: 1024 * 1024,  // Max message size
+    verifyClient: (info) => { // Connection verification
+        return true;
+    }
+});
+
+server.listen(3000);
+```
 
 ##### System Events
 
@@ -104,19 +141,39 @@ Every handler receives a `req` object:
 
 ```javascript
 app.on('/message', (req) => {
+    // Properties
     req.event                    // Event name: '/message'
     req.data                     // Data sent by client
     req.id                       // Socket ID (shortcut)
-    req.socket                   // The socket that sent this
+    req.socket                   // The socket instance
     req.app                      // The EmitApp instance
     
+    // Methods
     req.emit(event, data)        // Emit event to this socket
     req.set(key, value)          // Store data on socket
     req.get(key)                 // Get stored data
     req.join('#room')            // Join a room
     req.leave('#room')           // Leave a room
+    req.tag('*admin')            // Add a tag
+    req.untag('*admin')          // Remove a tag
+    req.hasTag('*admin')         // Check if has tag
     req.reply(data)              // Reply to request
     req.broadcast(event, opts)   // Broadcast to others
+});
+```
+
+#### Connection Info
+
+Access connection details via `req.info`:
+
+```javascript
+app.on('@connection', (req) => {
+    req.info.ip       // Client IP address
+    req.info.query    // URL query params: { token: 'abc' }
+    req.info.path     // URL path
+    req.info.headers  // HTTP headers
+    req.info.origin   // Origin header
+    req.info.secure   // Is HTTPS/WSS
 });
 ```
 
@@ -125,10 +182,12 @@ app.on('/message', (req) => {
 Access the underlying socket via `req.socket`:
 
 ```javascript
-req.socket.id            // Unique socket ID
-req.socket.data          // Custom data storage (use req.set/get instead)
-req.socket.rooms         // Set of rooms joined
-req.socket.emit(event, data)   // Send event to this socket
+req.socket.id                    // Unique socket ID (UUID)
+req.socket.data                  // Custom data storage
+req.socket.rooms                 // Set of rooms joined
+req.socket.tags                  // Set of tags
+req.socket.info                  // Connection info
+req.socket.emit(event, data)     // Send event to this socket
 ```
 
 ### Client
@@ -156,6 +215,8 @@ const socket = await EmitClient.connect(url, options);
 | `socket.request(event, data, opts)` | Request with response |
 | `socket.on(event, callback)` | Listen for events |
 | `socket.off(event, callback)` | Remove listener |
+| `socket.set(key, value)` | Store data locally |
+| `socket.get(key)` | Get stored data |
 | `socket.ns(prefix)` | Create namespace |
 | `socket.close()` | Disconnect |
 | `socket.connected` | Connection status |
@@ -213,7 +274,6 @@ app.on('/admin', [auth, adminOnly], (req) => {
 app.on('/join', (req) => {
     req.join('#' + req.data.room);
     
-    // Notify others in room
     req.broadcast('user-joined', {
         data: { id: req.id },
         to: '#' + req.data.room
@@ -227,7 +287,7 @@ app.on('/message', (req) => {
     req.broadcast('message', {
         data: { text: req.data.text },
         to: '#' + req.data.room,
-        includeSelf: true  // Include sender
+        includeSelf: true
     });
 });
 
@@ -236,6 +296,39 @@ app.broadcast('announcement', {
     data: { message: 'Server restarting!' },
     to: '#general'
 });
+```
+
+## Tags
+
+Tags allow you to label sockets for targeted messaging:
+
+```javascript
+app.on('/login', (req) => {
+    req.set('userId', req.data.userId);
+    
+    // Tag by role
+    if (req.data.isAdmin) {
+        req.tag('*admin');
+    }
+    req.tag('*authenticated');
+    
+    req.reply({ success: true });
+});
+
+// Broadcast to all admins
+app.broadcast('admin-alert', {
+    data: { message: 'New user registered' },
+    to: '*admin'
+});
+
+// Check tag in middleware
+const adminOnly = (req, next) => {
+    if (!req.hasTag('*admin')) {
+        req.reply({ error: 'Admin only' });
+        return;
+    }
+    next();
+};
 ```
 
 ## Namespaces
@@ -268,7 +361,7 @@ await chat.request('/message', { text: 'Hello!' });
 
 ```javascript
 const { EmitApp } = require('emit.gg');
-const heartbeat = require('emit.gg/src/plugins/heartbeat');
+const heartbeat = require('emit.gg/plugins/heartbeat');
 
 const app = new EmitApp();
 
@@ -306,7 +399,7 @@ module.exports = ({ option = false } = {}) => {
 Keeps connections alive with ping/pong:
 
 ```javascript
-const heartbeat = require('emit.gg/src/plugins/heartbeat');
+const heartbeat = require('emit.gg/plugins/heartbeat');
 
 app.plugin(heartbeat({ interval: 30000 }));
 
@@ -443,6 +536,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 ```
@@ -564,4 +658,3 @@ app.listen(3000);
 ## License
 
 MIT
-
