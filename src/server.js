@@ -75,7 +75,14 @@ class EmitApp {
 
         let targets;
         if (to && to.startsWith('#')) {
+            // Room targeting
             targets = this.rooms.get(to) || new Set();
+        } else if (to && to.startsWith('*')) {
+            // Tag targeting - filter sockets by tag
+            targets = new Set();
+            this.sockets.forEach(socket => {
+                if (socket.hasTag(to)) targets.add(socket);
+            });
         } else {
             targets = this.sockets;
         }
@@ -177,6 +184,7 @@ class EmitSocket {
         this.id = crypto.randomUUID();
         this.pendingRequests = new Map();
         this.rooms = new Set();
+        this.tags = new Set();
         this.data = {};
         this.info = null;    // Set by _handleConnection
         this.request = null; // Set by _handleConnection
@@ -218,6 +226,23 @@ class EmitSocket {
         this.rooms.delete(room);
         this.app._leaveRoom(room, this);
         return this;
+    }
+
+    tag(name) {
+        if (!name.startsWith('*')) name = '*' + name;
+        this.tags.add(name);
+        return this;
+    }
+
+    untag(name) {
+        if (!name.startsWith('*')) name = '*' + name;
+        this.tags.delete(name);
+        return this;
+    }
+
+    hasTag(name) {
+        if (!name.startsWith('*')) name = '*' + name;
+        return this.tags.has(name);
     }
 
     _runMiddleware(middleware, req, done) {
@@ -282,6 +307,17 @@ class EmitSocket {
                 socket.leave(room);
             },
 
+            // Shortcut for tag management
+            tag: (name) => {
+                socket.tag(name);
+            },
+            untag: (name) => {
+                socket.untag(name);
+            },
+            hasTag: (name) => {
+                return socket.hasTag(name);
+            },
+
             reply: ackId
                 ? (res) => this.ws.send(JSON.stringify({ type: 'ack', ackId, data: res }))
                 : () => { },
@@ -291,7 +327,14 @@ class EmitSocket {
 
                 let targets;
                 if (to && to.startsWith('#')) {
+                    // Room targeting
                     targets = app.rooms.get(to) || new Set();
+                } else if (to && to.startsWith('*')) {
+                    // Tag targeting
+                    targets = new Set();
+                    app.sockets.forEach(s => {
+                        if (s.hasTag(to)) targets.add(s);
+                    });
                 } else {
                     targets = app.sockets;
                 }
