@@ -69,6 +69,36 @@ const { EmitClient } = require('emit.gg');
 })();
 ```
 
+### Client (Browser)
+
+Using a script tag:
+
+```html
+<script src="https://unpkg.com/emit.gg/src/browser.js"></script>
+<script>
+(async () => {
+    const socket = await EmitClient.connect('ws://localhost:3000');
+    
+    socket.on('message', (data) => {
+        console.log('Received:', data);
+    });
+    
+    const result = await socket.request('/ping');
+    console.log(result);
+})();
+</script>
+```
+
+Or with ES modules:
+
+```html
+<script type="module">
+import { EmitClient } from 'emit.gg/browser';
+
+const socket = await EmitClient.connect('ws://localhost:3000');
+</script>
+```
+
 ## API Reference
 
 ### Server

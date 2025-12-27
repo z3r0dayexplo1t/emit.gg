@@ -1,13 +1,14 @@
 {
     "name": "emit.gg",
-    "version": "1.0.2",
+    "version": "1.0.4",
     "description": "A clean, minimal WebSocket framework with middleware and rooms",
     "main": "src/index.js",
-    "browser": "src/client.js",
+    "browser": "src/browser.js",
     "exports": {
         ".": "./src/index.js",
         "./server": "./src/server.js",
         "./client": "./src/client.js",
+        "./browser": "./src/browser.js",
         "./plugins/heartbeat": "./src/plugins/heartbeat.js",
         "./plugins/redis": "./src/plugins/redis.js"
     },
@@ -15,6 +16,7 @@
         "src/index.js",
         "src/server.js",
         "src/client.js",
+        "src/browser.js",
         "src/plugins/",
         "README.md",
         "LICENSE"
