@@ -74,7 +74,7 @@ const { EmitClient } = require('emit.gg');
 Using a script tag:
 
 ```html
-<script src="https://unpkg.com/emit.gg/src/browser.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/emit.gg@1.0.4/src/browser.js"></script>
 <script>
 (async () => {
     const socket = await EmitClient.connect('ws://localhost:3000');
