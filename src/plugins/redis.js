@@ -93,15 +93,17 @@ module.exports = ({ redis, pub, sub, prefix = 'emit.gg', channel = 'emit.gg' } =
 
         // ============ DIRECT MESSAGING ============
 
+        const originalEmitTo = app.emitTo.bind(app);
+
         app.emitTo = (socketId, event, data) => {
-            // Try local first
-            const localSocket = [...app.sockets].find(s => s.id === socketId);
+            // Try local first using the base implementation (O(1) lookup)
+            const localSocket = app.socketMap.get(socketId);
             if (localSocket) {
                 localSocket.emit(event, data);
                 return app;
             }
 
-            // Publish to Redis for other servers
+            // Socket not local - publish to Redis for other servers
             pub.publish(`${channel}:direct`, JSON.stringify({
                 _instance: instanceId,
                 targetSocketId: socketId,

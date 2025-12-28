@@ -119,6 +119,8 @@ const app = new EmitApp();
 | `app.plugin(fn)` | Add plugin |
 | `app.ns(prefix)` | Create namespace |
 | `app.broadcast(event, options)` | Broadcast to sockets |
+| `app.emitTo(socketId, event, data)` | Emit to specific socket by ID |
+| `app.getSocket(socketId)` | Get socket instance by ID |
 | `app.listen(port, [options], callback)` | Start standalone server |
 | `app.attach(server, [options])` | Attach to existing HTTP server |
 | `app.close()` | Close server |
@@ -326,6 +328,15 @@ app.broadcast('announcement', {
     data: { message: 'Server restarting!' },
     to: '#general'
 });
+
+// Direct messaging to specific socket
+app.emitTo(socketId, 'notification', { text: 'Hello!' });
+
+// Get socket instance for more control
+const socket = app.getSocket(socketId);
+if (socket) {
+    socket.emit('welcome', { message: 'Hi there!' });
+}
 ```
 
 ## Tags
@@ -484,10 +495,13 @@ app.broadcast('announcement', {
 app.broadcast('local', { data: {}, local: true });
 ```
 
-#### Direct Messaging
+#### Cross-Server Direct Messaging
+
+`emitTo()` works out of the box for local sockets. With Redis, it extends to reach sockets on other servers:
 
 ```javascript
-// Send to specific socket (even on another server)
+// Without Redis: reaches local sockets only (O(1) lookup)
+// With Redis: reaches sockets on ANY server
 app.emitTo(socketId, 'notification', { text: 'Hello' });
 ```
 

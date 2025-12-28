@@ -12,6 +12,7 @@ class EmitApp {
         this.handlers = new Map();
         this.rooms = new Map();
         this.sockets = new Set();
+        this.socketMap = new Map(); // socketId -> socket for O(1) lookup
         this.middleware = [];
     }
 
@@ -29,19 +30,20 @@ class EmitApp {
         };
     }
 
-    _handleConnection(ws, req, app) {
-        const socket = new EmitSocket(ws, app);
-        const info = app._extractConnectionInfo(req);
+    _handleConnection(ws, req) {
+        const socket = new EmitSocket(ws, this);
+        const info = this._extractConnectionInfo(req);
 
         // Store connection info on socket
         socket.info = info;
         socket.request = req;
 
-        app.sockets.add(socket);
+        this.sockets.add(socket);
+        this.socketMap.set(socket.id, socket);
 
-        const entry = app.handlers.get('@connection');
+        const entry = this.handlers.get('@connection');
         if (entry) {
-            entry.handler({ socket, app, req, info });
+            entry.handler({ socket, app: this, req, info });
         }
     }
 
@@ -91,6 +93,18 @@ class EmitApp {
         return this;
     }
 
+    emitTo(socketId, event, data) {
+        const socket = this.socketMap.get(socketId);
+        if (socket) {
+            socket.emit(event, data);
+        }
+        return this;
+    }
+
+    getSocket(socketId) {
+        return this.socketMap.get(socketId) || null;
+    }
+
     _joinRoom(room, socket) {
         if (!this.rooms.has(room)) {
             this.rooms.set(room, new Set());
@@ -125,7 +139,7 @@ class EmitApp {
         };
 
         this.wss = new WebSocketServer(wssOptions);
-        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req, this));
+        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req));
 
         callback?.();
         return this;
@@ -145,7 +159,7 @@ class EmitApp {
         }
 
         this.wss = new WebSocketServer(wssOptions);
-        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req, this));
+        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req));
 
         return this;
     }
@@ -206,6 +220,7 @@ class EmitSocket {
         ws.on('close', () => {
             this.app._leaveAllRooms(this);
             this.app.sockets.delete(this);
+            this.app.socketMap.delete(this.id);
 
             const entry = this.app.handlers.get('@disconnect');
             if (entry) {
