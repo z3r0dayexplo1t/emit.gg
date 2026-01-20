@@ -6,7 +6,7 @@
 (function (global) {
     'use strict';
 
-    class EmitClient {
+    class Client {
         constructor(ws, options = {}) {
             this.ws = ws;
             this.url = ws.url;
@@ -220,10 +220,10 @@
     // Export for different environments
     if (typeof module !== 'undefined' && module.exports) {
         // Node.js / CommonJS
-        module.exports = { EmitClient, ClientNamespace };
+        module.exports = { Client, ClientNamespace };
     } else {
         // Browser global
-        window.EmitClient = EmitClient;
+        window.Client = Client;
         window.ClientNamespace = ClientNamespace;
     }
 

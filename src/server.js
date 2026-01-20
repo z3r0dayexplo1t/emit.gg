@@ -17,8 +17,8 @@ class EmitApp {
         this.transport = options.transport || null;
     }
 
-    _handleConnection(socketAdapter, normalizedReq) {
-        const socket = new EmitSocket(socketAdapter, this);
+    _handleConnection(socketInstance, normalizedReq) {
+        const socket = new EmitSocket(socketInstance, this);
 
         // Store connection info on socket (already normalized by transport)
         socket.info = normalizedReq;
@@ -171,8 +171,8 @@ class EmitNamespace {
 }
 
 class EmitSocket {
-    constructor(socketAdapter, app) {
-        this.socket = socketAdapter; // The transport's socket adapter
+    constructor(socketInstance, app) {
+        this.socket = socketInstance; // The transport's socket instance
         this.app = app;
         this.id = crypto.randomUUID();
         this.pendingRequests = new Map();
