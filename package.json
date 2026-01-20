@@ -10,7 +10,10 @@
         "./client": "./src/client.js",
         "./browser": "./src/browser.js",
         "./plugins/heartbeat": "./src/plugins/heartbeat.js",
-        "./plugins/redis": "./src/plugins/redis.js"
+        "./plugins/redis": "./src/plugins/redis.js",
+        "./transports": "./src/transports/index.js",
+        "./transports/node": "./src/transports/node.js",
+        "./transports/bun": "./src/transports/bun.js"
     },
     "files": [
         "src/index.js",
@@ -18,6 +21,7 @@
         "src/client.js",
         "src/browser.js",
         "src/plugins/",
+        "src/transports/",
         "README.md",
         "LICENSE"
     ],

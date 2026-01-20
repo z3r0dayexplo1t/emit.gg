@@ -1,49 +1,34 @@
 /**
  * emit.gg - Server
  * Clean WebSocket framework with Express-like API
+ * Works with both Node.js and Bun
  */
 
-const { WebSocketServer } = require('ws');
 const crypto = require('crypto');
-const url = require('url');
+const { createTransport } = require('./transports');
 
 class EmitApp {
-    constructor() {
+    constructor(options = {}) {
         this.handlers = new Map();
         this.rooms = new Map();
         this.sockets = new Set();
         this.socketMap = new Map(); // socketId -> socket for O(1) lookup
         this.middleware = [];
+        this.transport = options.transport || null;
     }
 
-    _extractConnectionInfo(req) {
-        const parsed = url.parse(req.url || '', true);
-        return {
-            headers: req.headers,
-            query: parsed.query,
-            path: parsed.pathname,
-            ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim()
-                || req.socket?.remoteAddress
-                || null,
-            origin: req.headers.origin || null,
-            secure: req.socket?.encrypted || false
-        };
-    }
+    _handleConnection(socketAdapter, normalizedReq) {
+        const socket = new EmitSocket(socketAdapter, this);
 
-    _handleConnection(ws, req) {
-        const socket = new EmitSocket(ws, this);
-        const info = this._extractConnectionInfo(req);
-
-        // Store connection info on socket
-        socket.info = info;
-        socket.request = req;
+        // Store connection info on socket (already normalized by transport)
+        socket.info = normalizedReq;
 
         this.sockets.add(socket);
         this.socketMap.set(socket.id, socket);
 
         const entry = this.handlers.get('@connection');
         if (entry) {
-            entry.handler({ socket, app: this, req, info });
+            entry.handler({ socket, app: this, req: normalizedReq, info: normalizedReq });
         }
     }
 
@@ -133,43 +118,37 @@ class EmitApp {
             options = {};
         }
 
-        const wssOptions = {
-            port,
-            maxPayload: options.maxPayload || 1024 * 1024
-        };
+        // Create transport if not provided
+        if (!this.transport) {
+            this.transport = createTransport();
+        }
 
-        this.wss = new WebSocketServer(wssOptions);
-        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req));
+        this.transport.listen(port, options, (socket, req) => {
+            this._handleConnection(socket, req);
+        });
 
         callback?.();
         return this;
     }
 
     attach(server, options = {}) {
-        const wssOptions = {
-            server,
-            maxPayload: options.maxPayload || 1024 * 1024
-        };
-
-        // Pass through any additional ws options
-        if (options.path) wssOptions.path = options.path;
-        if (options.verifyClient) wssOptions.verifyClient = options.verifyClient;
-        if (options.perMessageDeflate !== undefined) {
-            wssOptions.perMessageDeflate = options.perMessageDeflate;
+        // Create transport if not provided
+        if (!this.transport) {
+            this.transport = createTransport();
         }
 
-        this.wss = new WebSocketServer(wssOptions);
-        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req));
+        this.transport.attach(server, options, (socket, req) => {
+            this._handleConnection(socket, req);
+        });
 
         return this;
     }
 
     close() {
-        return new Promise((resolve) => {
-            this.wss.close(() => {
-                resolve();
-            });
-        });
+        if (this.transport) {
+            return this.transport.close();
+        }
+        return Promise.resolve();
     }
 }
 
@@ -192,20 +171,20 @@ class EmitNamespace {
 }
 
 class EmitSocket {
-    constructor(ws, app) {
-        this.ws = ws;
+    constructor(socketAdapter, app) {
+        this.socket = socketAdapter; // The transport's socket adapter
         this.app = app;
         this.id = crypto.randomUUID();
         this.pendingRequests = new Map();
         this.rooms = new Set();
         this.tags = new Set();
         this.data = {};
-        this.info = null;    // Set by _handleConnection
-        this.request = null; // Set by _handleConnection
+        this.info = null; // Set by _handleConnection
 
-        ws.on('message', (raw) => {
+        // Set up message handler via the adapter
+        socketAdapter.onMessage((raw) => {
             try {
-                const message = JSON.parse(raw.toString());
+                const message = JSON.parse(raw);
                 this._handleMessage(message);
             } catch (err) {
                 const errorEntry = this.app.handlers.get('@error');
@@ -217,7 +196,8 @@ class EmitSocket {
             }
         });
 
-        ws.on('close', () => {
+        // Set up close handler via the adapter
+        socketAdapter.onClose(() => {
             this.app._leaveAllRooms(this);
             this.app.sockets.delete(this);
             this.app.socketMap.delete(this.id);
@@ -334,7 +314,7 @@ class EmitSocket {
             },
 
             reply: ackId
-                ? (res) => this.ws.send(JSON.stringify({ type: 'ack', ackId, data: res }))
+                ? (res) => this.socket.send(JSON.stringify({ type: 'ack', ackId, data: res }))
                 : () => { },
 
             broadcast(event, options = {}) {
@@ -422,7 +402,7 @@ class EmitSocket {
     }
 
     emit(event, data) {
-        this.ws.send(JSON.stringify({ event, data }));
+        this.socket.send(JSON.stringify({ event, data }));
         return this;
     }
 
@@ -437,7 +417,7 @@ class EmitSocket {
             }, timeout);
 
             this.pendingRequests.set(ackId, { resolve, timer });
-            this.ws.send(JSON.stringify({ event, data, ackId }));
+            this.socket.send(JSON.stringify({ event, data, ackId }));
         });
     }
 }
