@@ -1,6 +1,6 @@
-const { EmitApp } = require('./index');
+const { App } = require('./index');
 
-const app = new EmitApp();
+const app = new App();
 
 app.on('@connection', (req) => {
     console.log('Client connected', req.id);

@@ -3,12 +3,12 @@
 A clean, minimal WebSocket framework with middleware, rooms, and horizontal scaling.
 
 ```javascript
-const { EmitApp } = require('emit.gg');
+const { App } = require("emit.gg");
 
 const app = new EmitApp();
 
-app.on('/ping', (req) => {
-    req.reply({ pong: true });
+app.on("/ping", (req) => {
+  req.reply({ pong: true });
 });
 
 app.listen(3000);
@@ -37,35 +37,35 @@ npm install emit.gg
 ### Server
 
 ```javascript
-const { EmitApp } = require('emit.gg');
+const { App } = require("emit.gg");
 
-const app = new EmitApp();
+const app = new App();
 
-app.on('@connection', (req) => {
-    console.log('Connected:', req.id);
-    console.log('IP:', req.info.ip);
-    console.log('Query:', req.info.query);
+app.on("@connection", (req) => {
+  console.log("Connected:", req.id);
+  console.log("IP:", req.info.ip);
+  console.log("Query:", req.info.query);
 });
 
-app.on('/ping', (req) => {
-    req.reply({ pong: true, time: Date.now() });
+app.on("/ping", (req) => {
+  req.reply({ pong: true, time: Date.now() });
 });
 
 app.listen(3000, () => {
-    console.log('Server running on ws://localhost:3000');
+  console.log("Server running on ws://localhost:3000");
 });
 ```
 
 ### Client (Node.js)
 
 ```javascript
-const { EmitClient } = require('emit.gg');
+const { Client } = require("emit.gg");
 
 (async () => {
-    const socket = await EmitClient.connect('ws://localhost:3000');
-    
-    const result = await socket.request('/ping');
-    console.log(result);  // { pong: true, time: 1703602800000 }
+  const socket = await Client.connect("ws://localhost:3000");
+
+  const result = await socket.request("/ping");
+  console.log(result); // { pong: true, time: 1703602800000 }
 })();
 ```
 
@@ -76,16 +76,16 @@ Using a script tag:
 ```html
 <script src="https://cdn.jsdelivr.net/npm/emit.gg@1.0.4/src/browser.js"></script>
 <script>
-(async () => {
-    const socket = await EmitClient.connect('ws://localhost:3000');
-    
-    socket.on('message', (data) => {
-        console.log('Received:', data);
+  (async () => {
+    const socket = await Client.connect("ws://localhost:3000");
+
+    socket.on("message", (data) => {
+      console.log("Received:", data);
     });
-    
-    const result = await socket.request('/ping');
+
+    const result = await socket.request("/ping");
     console.log(result);
-})();
+  })();
 </script>
 ```
 
@@ -93,9 +93,9 @@ Or with ES modules:
 
 ```html
 <script type="module">
-import { EmitClient } from 'emit.gg/browser';
+  import { Client } from "emit.gg/browser";
 
-const socket = await EmitClient.connect('ws://localhost:3000');
+  const socket = await Client.connect("ws://localhost:3000");
 </script>
 ```
 
@@ -103,55 +103,60 @@ const socket = await EmitClient.connect('ws://localhost:3000');
 
 ### Server
 
-#### EmitApp
+#### App
 
 ```javascript
-const app = new EmitApp();
+const app = new App();
 ```
 
 ##### Methods
 
-| Method | Description |
-|--------|-------------|
-| `app.on(event, handler)` | Register event handler |
-| `app.on(event, middleware, handler)` | Handler with middleware |
-| `app.use(fn)` | Add global middleware |
-| `app.plugin(fn)` | Add plugin |
-| `app.ns(prefix)` | Create namespace |
-| `app.broadcast(event, options)` | Broadcast to sockets |
-| `app.emitTo(socketId, event, data)` | Emit to specific socket by ID |
-| `app.getSocket(socketId)` | Get socket instance by ID |
-| `app.listen(port, [options], callback)` | Start standalone server |
-| `app.attach(server, [options])` | Attach to existing HTTP server |
-| `app.close()` | Close server |
+| Method                                  | Description                    |
+| --------------------------------------- | ------------------------------ |
+| `app.on(event, handler)`                | Register event handler         |
+| `app.on(event, middleware, handler)`    | Handler with middleware        |
+| `app.use(fn)`                           | Add global middleware          |
+| `app.plugin(fn)`                        | Add plugin                     |
+| `app.ns(prefix)`                        | Create namespace               |
+| `app.broadcast(event, options)`         | Broadcast to sockets           |
+| `app.emitTo(socketId, event, data)`     | Emit to specific socket by ID  |
+| `app.getSocket(socketId)`               | Get socket instance by ID      |
+| `app.listen(port, [options], callback)` | Start standalone server        |
+| `app.attach(server, [options])`         | Attach to existing HTTP server |
+| `app.close()`                           | Close server                   |
 
 ##### Listen Options
 
 ```javascript
-app.listen(3000, {
-    maxPayload: 1024 * 1024  // Max message size (default: 1MB)
-}, () => {
-    console.log('Server started');
-});
+app.listen(
+  3000,
+  {
+    maxPayload: 1024 * 1024, // Max message size (default: 1MB)
+  },
+  () => {
+    console.log("Server started");
+  },
+);
 ```
 
 ##### Attach to HTTP Server
 
 ```javascript
-const http = require('http');
-const { EmitApp } = require('emit.gg');
+const http = require("http");
+const { App } = require("emit.gg");
 
 const server = http.createServer((req, res) => {
-    res.end('Hello');
+  res.end("Hello");
 });
 
-const app = new EmitApp();
+const app = new App();
 app.attach(server, {
-    path: '/ws',              // WebSocket path
-    maxPayload: 1024 * 1024,  // Max message size
-    verifyClient: (info) => { // Connection verification
-        return true;
-    }
+  path: "/ws", // WebSocket path
+  maxPayload: 1024 * 1024, // Max message size
+  verifyClient: (info) => {
+    // Connection verification
+    return true;
+  },
 });
 
 server.listen(3000);
@@ -159,38 +164,38 @@ server.listen(3000);
 
 ##### System Events
 
-| Event | Description |
-|-------|-------------|
-| `@connection` | Socket connected |
-| `@disconnect` | Socket disconnected |
-| `@error` | Error occurred |
-| `@any` | Catch-all for any event |
-| `@ping` | Heartbeat ping (with plugin) |
+| Event         | Description                  |
+| ------------- | ---------------------------- |
+| `@connection` | Socket connected             |
+| `@disconnect` | Socket disconnected          |
+| `@error`      | Error occurred               |
+| `@any`        | Catch-all for any event      |
+| `@ping`       | Heartbeat ping (with plugin) |
 
 #### Request Object (req)
 
 Every handler receives a `req` object:
 
 ```javascript
-app.on('/message', (req) => {
-    // Properties
-    req.event                    // Event name: '/message'
-    req.data                     // Data sent by client
-    req.id                       // Socket ID (shortcut)
-    req.socket                   // The socket instance
-    req.app                      // The EmitApp instance
-    
-    // Methods
-    req.emit(event, data)        // Emit event to this socket
-    req.set(key, value)          // Store data on socket
-    req.get(key)                 // Get stored data
-    req.join('#room')            // Join a room
-    req.leave('#room')           // Leave a room
-    req.tag('*admin')            // Add a tag
-    req.untag('*admin')          // Remove a tag
-    req.hasTag('*admin')         // Check if has tag
-    req.reply(data)              // Reply to request
-    req.broadcast(event, opts)   // Broadcast to others
+app.on("/message", (req) => {
+  // Properties
+  req.event; // Event name: '/message'
+  req.data; // Data sent by client
+  req.id; // Socket ID (shortcut)
+  req.socket; // The socket instance
+  req.app; // The EmitApp instance
+
+  // Methods
+  req.emit(event, data); // Emit event to this socket
+  req.set(key, value); // Store data on socket
+  req.get(key); // Get stored data
+  req.join("#room"); // Join a room
+  req.leave("#room"); // Leave a room
+  req.tag("*admin"); // Add a tag
+  req.untag("*admin"); // Remove a tag
+  req.hasTag("*admin"); // Check if has tag
+  req.reply(data); // Reply to request
+  req.broadcast(event, opts); // Broadcast to others
 });
 ```
 
@@ -199,13 +204,13 @@ app.on('/message', (req) => {
 Access connection details via `req.info`:
 
 ```javascript
-app.on('@connection', (req) => {
-    req.info.ip       // Client IP address
-    req.info.query    // URL query params: { token: 'abc' }
-    req.info.path     // URL path
-    req.info.headers  // HTTP headers
-    req.info.origin   // Origin header
-    req.info.secure   // Is HTTPS/WSS
+app.on("@connection", (req) => {
+  req.info.ip; // Client IP address
+  req.info.query; // URL query params: { token: 'abc' }
+  req.info.path; // URL path
+  req.info.headers; // HTTP headers
+  req.info.origin; // Origin header
+  req.info.secure; // Is HTTPS/WSS
 });
 ```
 
@@ -214,54 +219,54 @@ app.on('@connection', (req) => {
 Access the underlying socket via `req.socket`:
 
 ```javascript
-req.socket.id                    // Unique socket ID (UUID)
-req.socket.data                  // Custom data storage
-req.socket.rooms                 // Set of rooms joined
-req.socket.tags                  // Set of tags
-req.socket.info                  // Connection info
-req.socket.emit(event, data)     // Send event to this socket
+req.socket.id; // Unique socket ID (UUID)
+req.socket.data; // Custom data storage
+req.socket.rooms; // Set of rooms joined
+req.socket.tags; // Set of tags
+req.socket.info; // Connection info
+req.socket.emit(event, data); // Send event to this socket
 ```
 
 ### Client
 
-#### EmitClient
+#### Client
 
 ```javascript
-const socket = await EmitClient.connect(url, options);
+const socket = await Client.connect(url, options);
 ```
 
 ##### Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `reconnect` | `false` | Auto-reconnect on disconnect |
-| `reconnectDelay` | `1000` | Delay between reconnect attempts (ms) |
-| `maxRetries` | `10` | Maximum reconnect attempts |
-| `connectTimeout` | `10000` | Connection timeout (ms) |
+| Option           | Default | Description                           |
+| ---------------- | ------- | ------------------------------------- |
+| `reconnect`      | `false` | Auto-reconnect on disconnect          |
+| `reconnectDelay` | `1000`  | Delay between reconnect attempts (ms) |
+| `maxRetries`     | `10`    | Maximum reconnect attempts            |
+| `connectTimeout` | `10000` | Connection timeout (ms)               |
 
 ##### Methods
 
-| Method | Description |
-|--------|-------------|
-| `socket.emit(event, data)` | Fire and forget |
+| Method                              | Description           |
+| ----------------------------------- | --------------------- |
+| `socket.emit(event, data)`          | Fire and forget       |
 | `socket.request(event, data, opts)` | Request with response |
-| `socket.on(event, callback)` | Listen for events |
-| `socket.off(event, callback)` | Remove listener |
-| `socket.set(key, value)` | Store data locally |
-| `socket.get(key)` | Get stored data |
-| `socket.ns(prefix)` | Create namespace |
-| `socket.close()` | Disconnect |
-| `socket.connected` | Connection status |
+| `socket.on(event, callback)`        | Listen for events     |
+| `socket.off(event, callback)`       | Remove listener       |
+| `socket.set(key, value)`            | Store data locally    |
+| `socket.get(key)`                   | Get stored data       |
+| `socket.ns(prefix)`                 | Create namespace      |
+| `socket.close()`                    | Disconnect            |
+| `socket.connected`                  | Connection status     |
 
 ##### System Events
 
-| Event | Description |
-|-------|-------------|
-| `@connection` | Connected to server |
-| `@disconnect` | Disconnected from server |
-| `@reconnect` | Reconnected after disconnect |
-| `@error` | Connection error |
-| `@any` | Catch-all for any event |
+| Event         | Description                  |
+| ------------- | ---------------------------- |
+| `@connection` | Connected to server          |
+| `@disconnect` | Disconnected from server     |
+| `@reconnect`  | Reconnected after disconnect |
+| `@error`      | Connection error             |
+| `@any`        | Catch-all for any event      |
 
 ## Middleware
 
@@ -271,8 +276,8 @@ Runs for all events:
 
 ```javascript
 app.use((req, next) => {
-    console.log(`${req.id} -> ${req.event}`);
-    next();
+  console.log(`${req.id} -> ${req.event}`);
+  next();
 });
 ```
 
@@ -282,20 +287,20 @@ Runs for specific events:
 
 ```javascript
 const auth = (req, next) => {
-    if (!req.get('user')) {
-        req.reply({ error: 'Unauthorized' });
-        return;
-    }
-    next();
+  if (!req.get("user")) {
+    req.reply({ error: "Unauthorized" });
+    return;
+  }
+  next();
 };
 
-app.on('/profile', auth, (req) => {
-    req.reply({ user: req.get('user') });
+app.on("/profile", auth, (req) => {
+  req.reply({ user: req.get("user") });
 });
 
 // Multiple middleware
-app.on('/admin', [auth, adminOnly], (req) => {
-    req.reply({ admin: true });
+app.on("/admin", [auth, adminOnly], (req) => {
+  req.reply({ admin: true });
 });
 ```
 
@@ -303,39 +308,39 @@ app.on('/admin', [auth, adminOnly], (req) => {
 
 ```javascript
 // Join a room
-app.on('/join', (req) => {
-    req.join('#' + req.data.room);
-    
-    req.broadcast('user-joined', {
-        data: { id: req.id },
-        to: '#' + req.data.room
-    });
-    
-    req.reply({ joined: req.data.room });
+app.on("/join", (req) => {
+  req.join("#" + req.data.room);
+
+  req.broadcast("user-joined", {
+    data: { id: req.id },
+    to: "#" + req.data.room,
+  });
+
+  req.reply({ joined: req.data.room });
 });
 
 // Broadcast to room
-app.on('/message', (req) => {
-    req.broadcast('message', {
-        data: { text: req.data.text },
-        to: '#' + req.data.room,
-        includeSelf: true
-    });
+app.on("/message", (req) => {
+  req.broadcast("message", {
+    data: { text: req.data.text },
+    to: "#" + req.data.room,
+    includeSelf: true,
+  });
 });
 
 // App-level broadcast
-app.broadcast('announcement', {
-    data: { message: 'Server restarting!' },
-    to: '#general'
+app.broadcast("announcement", {
+  data: { message: "Server restarting!" },
+  to: "#general",
 });
 
 // Direct messaging to specific socket
-app.emitTo(socketId, 'notification', { text: 'Hello!' });
+app.emitTo(socketId, "notification", { text: "Hello!" });
 
 // Get socket instance for more control
 const socket = app.getSocket(socketId);
 if (socket) {
-    socket.emit('welcome', { message: 'Hi there!' });
+  socket.emit("welcome", { message: "Hi there!" });
 }
 ```
 
@@ -344,31 +349,31 @@ if (socket) {
 Tags allow you to label sockets for targeted messaging:
 
 ```javascript
-app.on('/login', (req) => {
-    req.set('userId', req.data.userId);
-    
-    // Tag by role
-    if (req.data.isAdmin) {
-        req.tag('*admin');
-    }
-    req.tag('*authenticated');
-    
-    req.reply({ success: true });
+app.on("/login", (req) => {
+  req.set("userId", req.data.userId);
+
+  // Tag by role
+  if (req.data.isAdmin) {
+    req.tag("*admin");
+  }
+  req.tag("*authenticated");
+
+  req.reply({ success: true });
 });
 
 // Broadcast to all admins
-app.broadcast('admin-alert', {
-    data: { message: 'New user registered' },
-    to: '*admin'
+app.broadcast("admin-alert", {
+  data: { message: "New user registered" },
+  to: "*admin",
 });
 
 // Check tag in middleware
 const adminOnly = (req, next) => {
-    if (!req.hasTag('*admin')) {
-        req.reply({ error: 'Admin only' });
-        return;
-    }
-    next();
+  if (!req.hasTag("*admin")) {
+    req.reply({ error: "Admin only" });
+    return;
+  }
+  next();
 };
 ```
 
@@ -392,8 +397,8 @@ lobby.on('/join', (req) => { ... });    // Handles '/game/lobby/join'
 
 ```javascript
 // Client
-const chat = socket.ns('/chat');
-await chat.request('/message', { text: 'Hello!' });
+const chat = socket.ns("/chat");
+await chat.request("/message", { text: "Hello!" });
 ```
 
 ## Plugins
@@ -401,18 +406,15 @@ await chat.request('/message', { text: 'Hello!' });
 ### Using Plugins
 
 ```javascript
-const { EmitApp } = require('emit.gg');
-const heartbeat = require('emit.gg/plugins/heartbeat');
+const { App } = require("emit.gg");
+const heartbeat = require("emit.gg/plugins/heartbeat");
 
-const app = new EmitApp();
+const app = new App();
 
 app.plugin(heartbeat({ interval: 30000 }));
 
 // Multiple plugins
-app.plugin([
-    heartbeat({ interval: 30000 }),
-    myPlugin({ option: true })
-]);
+app.plugin([heartbeat({ interval: 30000 }), myPlugin({ option: true })]);
 ```
 
 ### Creating Plugins
@@ -420,16 +422,16 @@ app.plugin([
 ```javascript
 // my-plugin.js
 module.exports = ({ option = false } = {}) => {
-    return (app) => {
-        app.use((req, next) => {
-            // Plugin logic
-            next();
-        });
-        
-        app.on('@connection', (req) => {
-            // Setup on connection
-        });
-    };
+  return (app) => {
+    app.use((req, next) => {
+      // Plugin logic
+      next();
+    });
+
+    app.on("@connection", (req) => {
+      // Setup on connection
+    });
+  };
 };
 ```
 
@@ -440,23 +442,23 @@ module.exports = ({ option = false } = {}) => {
 Keeps connections alive with ping/pong:
 
 ```javascript
-const heartbeat = require('emit.gg/plugins/heartbeat');
+const heartbeat = require("emit.gg/plugins/heartbeat");
 
 app.plugin(heartbeat({ interval: 30000 }));
 
-app.on('@ping', (req) => {
-    console.log('Heartbeat:', req.id);
+app.on("@ping", (req) => {
+  console.log("Heartbeat:", req.id);
 });
 ```
 
 ## Symbols
 
-| Symbol | Meaning | Example |
-|--------|---------|---------|
-| `@` | System event | `@connection`, `@disconnect` |
-| `/` | User event | `/ping`, `/message` |
-| `#` | Room | `#general`, `#game-123` |
-| `*` | Tag | `*admin`, `*premium` |
+| Symbol | Meaning      | Example                      |
+| ------ | ------------ | ---------------------------- |
+| `@`    | System event | `@connection`, `@disconnect` |
+| `/`    | User event   | `/ping`, `/message`          |
+| `#`    | Room         | `#general`, `#game-123`      |
+| `*`    | Tag          | `*admin`, `*premium`         |
 
 ## Scaling
 
@@ -465,16 +467,16 @@ app.on('@ping', (req) => {
 For horizontal scaling across multiple servers, use the Redis adapter:
 
 ```javascript
-const Redis = require('ioredis');
-const { EmitApp } = require('emit.gg');
-const redisAdapter = require('emit.gg/plugins/redis');
+const Redis = require("ioredis");
+const { App } = require("emit.gg");
+const redisAdapter = require("emit.gg/plugins/redis");
 
 // Create Redis clients
-const redis = new Redis();  // For data storage
-const pub = new Redis();    // For publishing
-const sub = new Redis();    // For subscribing
+const redis = new Redis(); // For data storage
+const pub = new Redis(); // For publishing
+const sub = new Redis(); // For subscribing
 
-const app = new EmitApp();
+const app = new App();
 app.plugin(redisAdapter({ redis, pub, sub }));
 
 app.listen(3000);
@@ -486,13 +488,13 @@ app.listen(3000);
 
 ```javascript
 // Broadcasts reach all connected servers
-app.broadcast('announcement', { 
-    data: { text: 'Hello everyone!' },
-    to: '#general'
+app.broadcast("announcement", {
+  data: { text: "Hello everyone!" },
+  to: "#general",
 });
 
 // Local-only broadcast (just this server)
-app.broadcast('local', { data: {}, local: true });
+app.broadcast("local", { data: {}, local: true });
 ```
 
 #### Cross-Server Direct Messaging
@@ -502,17 +504,17 @@ app.broadcast('local', { data: {}, local: true });
 ```javascript
 // Without Redis: reaches local sockets only (O(1) lookup)
 // With Redis: reaches sockets on ANY server
-app.emitTo(socketId, 'notification', { text: 'Hello' });
+app.emitTo(socketId, "notification", { text: "Hello" });
 ```
 
 #### Room Sync
 
 ```javascript
 // Get room size across all servers
-const count = await app.getRoomSize('#lobby');
+const count = await app.getRoomSize("#lobby");
 
 // Get all socket IDs in room
-const members = await app.getRoomMembers('#lobby');
+const members = await app.getRoomMembers("#lobby");
 ```
 
 #### Socket Presence
@@ -532,17 +534,17 @@ const ids = await app.getAllSocketIds();
 
 ```javascript
 // Track user online status
-await app.setUserOnline('user123', socketId);
-await app.setUserOffline('user123');
+await app.setUserOnline("user123", socketId);
+await app.setUserOffline("user123");
 
 // Check if user is online
-const online = await app.isUserOnline('user123');
+const online = await app.isUserOnline("user123");
 
 // Get user's socket ID
-const socketId = await app.getUserSocketId('user123');
+const socketId = await app.getUserSocketId("user123");
 
 // Send message to user directly
-await app.emitToUser('user123', 'notification', { text: 'Hello' });
+await app.emitToUser("user123", "notification", { text: "Hello" });
 
 // Get online stats
 const count = await app.getOnlineUserCount();
@@ -553,12 +555,12 @@ const users = await app.getOnlineUsers();
 
 ```javascript
 // Sync tags to Redis
-await app.syncTag(socketId, '*admin');
-await app.unsyncTag(socketId, '*admin');
+await app.syncTag(socketId, "*admin");
+await app.unsyncTag(socketId, "*admin");
 
 // Query tags across servers
-const admins = await app.getTaggedSockets('*admin');
-const count = await app.getTagCount('*admin');
+const admins = await app.getTaggedSockets("*admin");
+const count = await app.getTagCount("*admin");
 ```
 
 ### Load Balancer Setup
@@ -600,37 +602,37 @@ backend websocket
 
 ```javascript
 // Server
-const { EmitApp } = require('emit.gg');
-const heartbeat = require('emit.gg/plugins/heartbeat');
+const { App } = require("emit.gg");
+const heartbeat = require("emit.gg/plugins/heartbeat");
 
-const app = new EmitApp();
+const app = new App();
 app.plugin(heartbeat({ interval: 30000 }));
 
-app.on('@connection', (req) => {
-    console.log('Connected:', req.id);
+app.on("@connection", (req) => {
+  console.log("Connected:", req.id);
 });
 
-app.on('/join', (req) => {
-    req.set('username', req.data.username);
-    req.join('#chat');
-    
-    req.broadcast('user-joined', {
-        data: { username: req.data.username },
-        to: '#chat'
-    });
-    
-    req.reply({ joined: true });
+app.on("/join", (req) => {
+  req.set("username", req.data.username);
+  req.join("#chat");
+
+  req.broadcast("user-joined", {
+    data: { username: req.data.username },
+    to: "#chat",
+  });
+
+  req.reply({ joined: true });
 });
 
-app.on('/message', (req) => {
-    req.broadcast('message', {
-        data: {
-            username: req.get('username'),
-            text: req.data.text
-        },
-        to: '#chat',
-        includeSelf: true
-    });
+app.on("/message", (req) => {
+  req.broadcast("message", {
+    data: {
+      username: req.get("username"),
+      text: req.data.text,
+    },
+    to: "#chat",
+    includeSelf: true,
+  });
 });
 
 app.listen(3000);
@@ -638,62 +640,62 @@ app.listen(3000);
 
 ```javascript
 // Client
-const { EmitClient } = require('emit.gg');
+const { Client } = require("emit.gg");
 
 (async () => {
-    const socket = await EmitClient.connect('ws://localhost:3000', {
-        reconnect: true
-    });
-    
-    await socket.request('/join', { username: 'Alice' });
-    
-    socket.on('message', (data) => {
-        console.log(`${data.username}: ${data.text}`);
-    });
-    
-    socket.emit('/message', { text: 'Hello everyone!' });
+  const socket = await Client.connect("ws://localhost:3000", {
+    reconnect: true,
+  });
+
+  await socket.request("/join", { username: "Alice" });
+
+  socket.on("message", (data) => {
+    console.log(`${data.username}: ${data.text}`);
+  });
+
+  socket.emit("/message", { text: "Hello everyone!" });
 })();
 ```
 
 ### Scaled Chat with Redis
 
 ```javascript
-const Redis = require('ioredis');
-const { EmitApp } = require('emit.gg');
-const heartbeat = require('emit.gg/plugins/heartbeat');
-const redisAdapter = require('emit.gg/plugins/redis');
+const Redis = require("ioredis");
+const { App } = require("emit.gg");
+const heartbeat = require("emit.gg/plugins/heartbeat");
+const redisAdapter = require("emit.gg/plugins/redis");
 
 const redis = new Redis();
 const pub = new Redis();
 const sub = new Redis();
 
-const app = new EmitApp();
+const app = new App();
 app.plugin(heartbeat({ interval: 30000 }));
 app.plugin(redisAdapter({ redis, pub, sub }));
 
-app.on('@connection', async (req) => {
-    const userId = req.info.query.userId;
-    if (userId) {
-        req.set('userId', userId);
-        await app.setUserOnline(userId, req.id);
-    }
-    
-    const total = await app.getTotalSockets();
-    console.log(`Connected: ${req.id} (${total} total)`);
+app.on("@connection", async (req) => {
+  const userId = req.info.query.userId;
+  if (userId) {
+    req.set("userId", userId);
+    await app.setUserOnline(userId, req.id);
+  }
+
+  const total = await app.getTotalSockets();
+  console.log(`Connected: ${req.id} (${total} total)`);
 });
 
-app.on('@disconnect', async (req) => {
-    const userId = req.get('userId');
-    if (userId) {
-        await app.setUserOffline(userId);
-    }
+app.on("@disconnect", async (req) => {
+  const userId = req.get("userId");
+  if (userId) {
+    await app.setUserOffline(userId);
+  }
 });
 
-app.on('/dm', async (req) => {
-    await app.emitToUser(req.data.to, 'dm', {
-        from: req.get('userId'),
-        text: req.data.text
-    });
+app.on("/dm", async (req) => {
+  await app.emitToUser(req.data.to, "dm", {
+    from: req.get("userId"),
+    text: req.data.text,
+  });
 });
 
 app.listen(3000);

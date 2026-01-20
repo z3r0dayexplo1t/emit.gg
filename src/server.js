@@ -7,7 +7,7 @@
 const crypto = require('crypto');
 const { createTransport } = require('./transports');
 
-class EmitApp {
+class App {
     constructor(options = {}) {
         this.handlers = new Map();
         this.rooms = new Map();
@@ -18,7 +18,7 @@ class EmitApp {
     }
 
     _handleConnection(socketInstance, normalizedReq) {
-        const socket = new EmitSocket(socketInstance, this);
+        const socket = new Socket(socketInstance, this);
 
         // Store connection info on socket (already normalized by transport)
         socket.info = normalizedReq;
@@ -54,7 +54,7 @@ class EmitApp {
     }
 
     ns(prefix) {
-        return new EmitNamespace(this, prefix);
+        return new Namespace(this, prefix);
     }
 
     broadcast(event, options = {}) {
@@ -152,7 +152,7 @@ class EmitApp {
     }
 }
 
-class EmitNamespace {
+class Namespace {
     constructor(app, prefix) {
         this.app = app;
         this.prefix = prefix;
@@ -166,11 +166,11 @@ class EmitNamespace {
     }
 
     ns(prefix) {
-        return new EmitNamespace(this.app, this.prefix + prefix);
+        return new Namespace(this.app, this.prefix + prefix);
     }
 }
 
-class EmitSocket {
+class Socket {
     constructor(socketInstance, app) {
         this.socket = socketInstance; // The transport's socket instance
         this.app = app;
@@ -182,7 +182,7 @@ class EmitSocket {
         this.info = null; // Set by _handleConnection
 
         // Set up message handler via the adapter
-        socketAdapter.onMessage((raw) => {
+        this.socket.onMessage((raw) => {
             try {
                 const message = JSON.parse(raw);
                 this._handleMessage(message);
@@ -197,7 +197,7 @@ class EmitSocket {
         });
 
         // Set up close handler via the adapter
-        socketAdapter.onClose(() => {
+        this.socket.onClose(() => {
             this.app._leaveAllRooms(this);
             this.app.sockets.delete(this);
             this.app.socketMap.delete(this.id);
@@ -422,4 +422,4 @@ class EmitSocket {
     }
 }
 
-module.exports = { EmitApp, EmitSocket, EmitNamespace };
+module.exports = { App, Socket, Namespace };

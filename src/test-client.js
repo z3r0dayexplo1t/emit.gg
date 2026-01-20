@@ -1,7 +1,7 @@
-const { EmitClient } = require('./index');
+const { Client } = require('./index');
 
 (async () => {
-    const client = await EmitClient.connect('ws://localhost:3000');
+    const client = await Client.connect('ws://localhost:3000');
 
     client.on('@connection', () => {
         console.log('Connected to server');

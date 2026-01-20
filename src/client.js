@@ -6,7 +6,7 @@
 const WebSocket = require('ws');
 const crypto = require('crypto');
 
-class EmitClient {
+class Client {
     constructor(ws, options = {}) {
         this.ws = ws;
         this.url = ws.url;
@@ -31,7 +31,7 @@ class EmitClient {
 
             ws.on('open', () => {
                 clearTimeout(timer);
-                const client = new EmitClient(ws, { ...options, url });
+                const client = new Client(ws, { ...options, url });
                 client._callListeners('@connection', {});
                 resolve(client);
             });
@@ -213,4 +213,4 @@ class ClientNamespace {
     }
 }
 
-module.exports = { EmitClient, ClientNamespace };
+module.exports = { Client, ClientNamespace };

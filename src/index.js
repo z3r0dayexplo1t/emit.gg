@@ -3,16 +3,16 @@
  * Clean WebSocket framework
  */
 
-const { EmitApp, EmitSocket, EmitNamespace } = require('./server');
-const { EmitClient, ClientNamespace } = require('./client');
+const { App, Socket, Namespace } = require('./server');
+const { Client, ClientNamespace } = require('./client');
 
 module.exports = {
     // Server
-    EmitApp,
-    EmitSocket,
-    EmitNamespace,
+    App,
+    Socket,
+    Namespace,
 
     // Client
-    EmitClient,
+    Client,
     ClientNamespace
 };
