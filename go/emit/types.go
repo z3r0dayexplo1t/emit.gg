@@ -1,8 +1,10 @@
 package emit
 
-import "time"
+import (
+	"time"
+)
 
-type HanddlerFunc func(*Request) error
+type HandlerFunc func(*Request) error
 type MiddlewareFunc func(*Request, NextFunc) error
 type NextFunc func() error
 

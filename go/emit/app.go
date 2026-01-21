@@ -1,118 +1,114 @@
 package emit
 
-import(
-	"sync"
-	"time"
-	"github.com/coder/websocket"
+import (
 	"context"
+	"log"
 	"net/http"
+	"sync"
+
+	"github.com/coder/websocket"
 )
 
-
-
-
-type App struct{
-	handlers sync.Map 
-	rooms sync.Map
-	sockets sync.Map 
+type App struct {
+	handlers   sync.Map
+	rooms      sync.Map
+	sockets    sync.Map
 	middleware []MiddlewareFunc
-	server *http.Server
-	ctx context.Context
-	cancel context.CancelFunc
+	server     *http.Server
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
-
-func New() *App{
+func New() *App {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &App{
-		ctx: ctx, 
+		ctx:    ctx,
 		cancel: cancel,
 	}
 }
 
-
-func (a *App) Use(fn MiddlewareFunc) *App{
+func (a *App) Use(fn MiddlewareFunc) *App {
 	a.middleware = append(a.middleware, fn)
 	return a
 }
 
-
-func (a *App) On (event string, args ...any) *App{
-	if len(args) == 0{
+func (a *App) On(event string, args ...any) *App {
+	if len(args) == 0 {
 		return a
 	}
 
-	handler := args[len(args)-1].(HandlerFunc)
+	handler, ok := args[len(args)-1].(func(*Request) error)
+	if !ok {
+		return a
+	}
 	var middleware []MiddlewareFunc
 
-	if len(args) > 1{
-		for _, m := range args[:len(args)-1]{
+	if len(args) > 1 {
+		for _, m := range args[:len(args)-1] {
 			middleware = append(middleware, m.(MiddlewareFunc))
 		}
 	}
 
 	a.handlers.Store(event, &handlerEntry{
-		handler: handler, 
+		handler:    handler,
 		middleware: middleware,
 	})
 
 	return a
 }
 
-func (a *App) Namespace(prefix string) *Namespace{
+func (a *App) Namespace(prefix string) *Namespace {
 	return &Namespace{
-		app: a, 
+		app:    a,
 		prefix: prefix,
 	}
 }
 
-func (a *App) Broadcast(event string, data map[string]any, to string){
+func (a *App) Broadcast(event string, data map[string]any, to string) {
 	var targets []*Socket
 
-	if to != ""{
-		if to[0] == '#'{
-			if roomMap, ok := a.rooms.Load(to); ok{
+	if to != "" {
+		if to[0] == '#' {
+			if roomMap, ok := a.rooms.Load(to); ok {
 				rm := roomMap.(*sync.Map)
-				rm.Range(func(key, _ any) bool{
-					if socket, ok := a.sockets.Load(key); ok{
+				rm.Range(func(key, _ any) bool {
+					if socket, ok := a.sockets.Load(key); ok {
 						targets = append(targets, socket.(*Socket))
 					}
 					return true
 				})
 			}
-		}else if to[0] == '*'{
-			a.sockets.Range(func(_, value any) bool{
+		} else if to[0] == '*' {
+			a.sockets.Range(func(_, value any) bool {
 				socket := value.(*Socket)
-				if socket.HasTag(to){
+				if socket.HasTag(to) {
 					targets = append(targets, socket)
 				}
 				return true
 			})
-		}else{
-			a.sockets.Range(func(_, value any) bool{
+		} else {
+			a.sockets.Range(func(_, value any) bool {
 				targets = append(targets, value.(*Socket))
 				return true
 			})
 		}
 
 		msg := Message{
-			Event: event, 
-			Data: data,
+			Event: event,
+			Data:  data,
 		}
-		for _, socket := range targets{
+		for _, socket := range targets {
 			socket.emit(msg)
 		}
 	}
 }
 
-
-func (a *App) GetSocket(socketID string) *Socket{
-	if socket, ok := a.sockets.Load(socketID); ok{
+func (a *App) GetSocket(socketID string) *Socket {
+	if socket, ok := a.sockets.Load(socketID); ok {
 		return socket.(*Socket)
 	}
 	return nil
 }
-
 
 func (a *App) Listen(addr string) error {
 	mux := http.NewServeMux()
@@ -125,21 +121,20 @@ func (a *App) Listen(addr string) error {
 	return a.server.ListenAndServe()
 }
 
-func (a *App) Close() error{
+func (a *App) Close() error {
 	a.cancel()
-	if a.server != nil{
+	if a.server != nil {
 		return a.server.Shutdown(context.Background())
 	}
-	return nil 
+	return nil
 }
 
-
-func (a *App) handleWebSocket( w http.ResponseWriterm r *http.Request){
+func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
 
-	if err != nil{
+	if err != nil {
 		log.Printf("Failed to accept websocket: %v", err)
 		return
 	}
@@ -147,13 +142,12 @@ func (a *App) handleWebSocket( w http.ResponseWriterm r *http.Request){
 	socket := newSocket(conn, a, r)
 	a.sockets.Store(socket.ID, socket)
 
-
-	if entry, ok := a.handlers.Load("@connection"); ok{
+	if entry, ok := a.handlers.Load("@connection"); ok {
 		req := &Request{
-			Event: "@connection", 
+			Event:  "@connection",
 			Socket: socket,
-			App: a, 
-			ctx: socket.ctx,
+			App:    a,
+			ctx:    socket.ctx,
 		}
 		entry.(*handlerEntry).handler(req)
 	}
@@ -162,12 +156,10 @@ func (a *App) handleWebSocket( w http.ResponseWriterm r *http.Request){
 	go socket.writePump()
 }
 
-
-func (a *App) joinRoom(room string, socket *Socket){
+func (a *App) joinRoom(room string, socket *Socket) {
 	roomMap, _ := a.rooms.LoadOrStore(room, &sync.Map{})
 	roomMap.(*sync.Map).Store(socket.ID, true)
 }
-
 
 func (a *App) leaveRoom(room string, socket *Socket) {
 	if roomMap, ok := a.rooms.Load(room); ok {
